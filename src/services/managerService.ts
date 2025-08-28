@@ -1,4 +1,4 @@
-import { getTeamRoster, getMatchups, setLineup, addDropPlayers, proposeTrade, getLeagueFreeAgents, getLeagueTeams } from '../clients/yahooFantasy.js';
+import { getTeamRoster, getMatchups, setLineup, addDropPlayers, proposeTrade, getLeagueFreeAgents, getLeagueTeams, getDraftResults, getUndraftedPlayers } from '../clients/yahooFantasy.js';
 import { decideLineup } from '../strategies/lineup.js';
 import { decideWaiverAction } from '../strategies/waivers.js';
 import { proposeTradeFromContext } from '../strategies/trades.js';
@@ -6,6 +6,7 @@ import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { extractLeagueTeams, mapFreeAgentsFromLeaguePlayersResponse, mapPlayersFromRosterResponse } from '../clients/yahooParsers.js';
 import { getEffectiveLeagueSettings } from '../util/leagueSettings.js';
+import { suggestDraftPicks } from '../strategies/draft.js';
 
 function toXml(obj: any): string {
   // Minimal XML helper for Yahoo write endpoints; replace with robust lib if needed.
@@ -91,4 +92,20 @@ export async function runTrade(): Promise<{ proposed: boolean; message?: string 
   await proposeTrade(config.leagueKey, payload);
   logger.info('Proposed trade');
   return { proposed: true, message: proposal.message };
+}
+
+export async function runDraftSuggest(top = 5, useYahooUndrafted = true): Promise<{ picks: any[]; rationale: string }> {
+  if (!config.leagueKey) throw new Error('YAHOO_LEAGUE_KEY required for draft suggest');
+  const { effective } = await getEffectiveLeagueSettings();
+  let available: any[] = [];
+  if (useYahooUndrafted) {
+    try {
+      const undraftedRaw = await getUndraftedPlayers(config.leagueKey, 0, 75);
+      available = mapFreeAgentsFromLeaguePlayersResponse(undraftedRaw);
+    } catch {
+      available = [];
+    }
+  }
+  const suggestion = await suggestDraftPicks(available, { leagueSettings: effective, top });
+  return { picks: suggestion.picks, rationale: suggestion.rationale };
 }

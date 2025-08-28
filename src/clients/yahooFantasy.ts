@@ -91,3 +91,17 @@ export async function getLeagueSettings(leagueKey: string) {
   const { data } = await client.get(url, { headers: { Accept: 'application/json' } });
   return data;
 }
+
+export async function getDraftResults(leagueKey: string) {
+  const client = await getClient();
+  const url = `/league/${leagueKey}/draftresults`;
+  const { data } = await client.get(url, { headers: { Accept: 'application/json' } });
+  return data;
+}
+
+export async function getUndraftedPlayers(leagueKey: string, start = 0, count = 50) {
+  const client = await getClient();
+  const url = `/league/${leagueKey}/players;draft_status=undrafted;start=${start};count=${count}`;
+  const { data } = await client.get(url, { headers: { Accept: 'application/json' } });
+  return data;
+}

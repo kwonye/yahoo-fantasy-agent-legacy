@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { assertYahooSecrets, config } from './config.js';
 import { getAuthUrl, exchangeCodeForTokens, exchangeEnvAuthCodeIfPresent, getEnvAuthCodeUsedThisRun } from './clients/yahooAuth.js';
 import { runLineup, runTrade, runWaivers } from './services/managerService.js';
+import { runDraftSuggest } from './services/managerService.js';
 import { loadTokens, saveTokens, TokenBundle } from './store/tokenStore.js';
 import fs from 'fs';
 import path from 'path';
@@ -215,5 +216,45 @@ router.post('/actions/run-all', async (_req, res) => {
     res.json({ lineup, waivers, trade });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed run-all' });
+  }
+});
+
+// Draft assistance
+router.get('/draft/status', async (_req, res) => {
+  try {
+    if (!config.leagueKey) return res.status(400).json({ error: 'Missing YAHOO_LEAGUE_KEY' });
+    const raw = await (await import('./clients/yahooFantasy.js')).getDraftResults(config.leagueKey);
+    res.json(raw);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed draft status' });
+  }
+});
+
+router.get('/draft/undrafted', async (req, res) => {
+  try {
+    if (!config.leagueKey) return res.status(400).json({ error: 'Missing YAHOO_LEAGUE_KEY' });
+    const start = Number(req.query.start || 0);
+    const count = Number(req.query.count || 50);
+    const raw = await (await import('./clients/yahooFantasy.js')).getUndraftedPlayers(config.leagueKey, start, count);
+    res.json(raw);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed fetch undrafted' });
+  }
+});
+
+router.post('/draft/suggest', async (req, res) => {
+  try {
+    const top = Number(req.body?.top || 5);
+    // If client provides available players, use them; otherwise fetch via Yahoo (best-effort)
+    if (Array.isArray(req.body?.availablePlayers)) {
+      const { effective } = await (await import('./util/leagueSettings.js')).getEffectiveLeagueSettings();
+      const { suggestDraftPicks } = await import('./strategies/draft.js');
+      const suggestion = await suggestDraftPicks(req.body.availablePlayers, { leagueSettings: effective, top });
+      return res.json(suggestion);
+    }
+    const result = await runDraftSuggest(top, true);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed draft suggest' });
   }
 });

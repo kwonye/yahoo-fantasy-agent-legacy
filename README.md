@@ -72,6 +72,22 @@ Strategies now factor your settings into decisions:
 - Waivers: Uses FAAB constraints, position priorities, and league roster rules.
 - Trades: Avoids lopsided offers with scoring and roster context.
 
+## Live Draft Assistance
+
+Use the built-in draft helper to get suggestions during your live draft.
+
+- Get draft status: `GET /draft/status` (Yahoo `draftresults`)
+- Get undrafted pool: `GET /draft/undrafted?start=0&count=50` (best-effort via Yahoo)
+- Suggest picks (auto-fetch undrafted):
+  - `POST /draft/suggest` with optional body `{ "top": 5 }`
+- Suggest picks (client-provided board):
+  - `POST /draft/suggest` with body:
+    ```json
+    { "top": 5, "availablePlayers": [ { "player_id": "123", "name": "A", "eligible_positions": ["RB"] } ] }
+    ```
+
+The suggestions consider `leagueSettings` (Yahoo + your overrides) and manager preferences when ranking positions and players.
+
 Normalized schema fields the bot uses:
 - `leagueName`, `season`
 - `positionCounts` and `rosterPositions` (ordered slots like `QB,RB,RB,WR,WR,TE,FLEX,...`)
