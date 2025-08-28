@@ -84,3 +84,10 @@ export async function getLeagueFreeAgents(leagueKey: string, start = 0, count = 
   const { data } = await client.get(url, { headers: { Accept: 'application/json' } });
   return data;
 }
+
+export async function getLeagueSettings(leagueKey: string) {
+  const client = await getClient();
+  const url = `/league/${leagueKey}/settings`;
+  const { data } = await client.get(url, { headers: { Accept: 'application/json' } });
+  return data;
+}

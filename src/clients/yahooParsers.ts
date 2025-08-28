@@ -94,3 +94,105 @@ export function extractLeagueTeams(resp: any): Array<{ team_key: string; name?: 
   }
 }
 
+// Normalized league settings schema used by prompts/strategies
+export type NormalizedLeagueSettings = {
+  leagueName?: string;
+  season?: number;
+  positionCounts?: Record<string, number>;
+  rosterPositions?: string[];
+  flexSlots?: string[];
+  benchSpots?: number;
+  irSpots?: number;
+  waiverType?: 'FAAB' | 'Priority';
+  faabBudget?: number;
+  tradeDeadlineDate?: string; // ISO date if available
+  scoring?: Record<string, number>; // display_name -> modifier value
+};
+
+function coerceNumber(x: any): number | undefined {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+export function normalizeLeagueSettings(resp: any): NormalizedLeagueSettings {
+  try {
+    const league = resp?.fantasy_content?.league;
+    const leagueObj = Array.isArray(league) ? league[1] : league;
+    const settings = leagueObj?.settings || (Array.isArray(leagueObj) ? leagueObj.find((x: any) => x?.settings) : undefined);
+    const out: NormalizedLeagueSettings = {};
+
+    // Basic
+    const name = leagueObj?.name || leagueObj?.league_name;
+    const season = coerceNumber(leagueObj?.season) ?? coerceNumber(leagueObj?.season_year);
+    if (name) out.leagueName = String(name);
+    if (season) out.season = season;
+
+    // Roster positions and counts
+    const rosterPositions = settings?.roster_positions?.roster_position || settings?.roster_positions;
+    const rpList: any[] = Array.isArray(rosterPositions) ? rosterPositions : rosterPositions ? [rosterPositions] : [];
+    const positionCounts: Record<string, number> = {};
+    const rosterOrder: string[] = [];
+    const flexSlots: string[] = [];
+    let benchSpots = 0;
+    let irSpots = 0;
+    for (const r of rpList) {
+      const pos = String(r?.position ?? r?.pos ?? r);
+      const count = coerceNumber(r?.count) ?? 1;
+      if (!pos) continue;
+      if (pos.includes('/')) {
+        // Flex designation like W/R/T
+        flexSlots.push(pos);
+      } else if (pos === 'BN') {
+        benchSpots += count ?? 1;
+      } else if (pos === 'IR') {
+        irSpots += count ?? 1;
+      } else {
+        positionCounts[pos] = (positionCounts[pos] || 0) + (count ?? 1);
+        for (let i = 0; i < (count ?? 1); i++) rosterOrder.push(pos);
+      }
+    }
+    if (Object.keys(positionCounts).length) out.positionCounts = positionCounts;
+    if (rosterOrder.length) out.rosterPositions = rosterOrder;
+    if (flexSlots.length) out.flexSlots = flexSlots;
+    if (benchSpots) out.benchSpots = benchSpots;
+    if (irSpots) out.irSpots = irSpots;
+
+    // Waivers/FAAB
+    const waiverTypeRaw = settings?.waiver_type || settings?.waiver_rule || settings?.waivers_type;
+    if (waiverTypeRaw) {
+      const v = String(waiverTypeRaw).toUpperCase();
+      out.waiverType = v.includes('FAAB') ? 'FAAB' : 'Priority';
+    }
+    const faabBudget = settings?.faab || settings?.faab_budget || settings?.faab_balance;
+    const budgetNum = coerceNumber(faabBudget);
+    if (budgetNum !== undefined) out.faabBudget = budgetNum;
+
+    // Trade deadline
+    const tradeEnd = settings?.trade_end_date || settings?.trade_deadline || leagueObj?.trade_end_date;
+    if (tradeEnd) out.tradeDeadlineDate = String(tradeEnd);
+
+    // Scoring: map stat_modifiers by display name
+    const cats = settings?.stat_categories?.stats || settings?.stat_categories;
+    const catList: any[] = cats?.stat || cats ? (Array.isArray(cats?.stat || cats) ? (cats.stat || cats) : [cats.stat || cats]) : [];
+    const modifiers = settings?.stat_modifiers?.stats || settings?.stat_modifiers;
+    const modList: any[] = modifiers?.stat || modifiers ? (Array.isArray(modifiers?.stat || modifiers) ? (modifiers.stat || modifiers) : [modifiers.stat || modifiers]) : [];
+    const idToName = new Map<string, string>();
+    for (const c of catList) {
+      const id = String(c?.stat_id ?? c?.id ?? '');
+      const nm = c?.display_name || c?.name || c?.abbrev;
+      if (id) idToName.set(id, String(nm ?? id));
+    }
+    const scoring: Record<string, number> = {};
+    for (const m of modList) {
+      const id = String(m?.stat?.stat_id ?? m?.stat_id ?? '');
+      const val = coerceNumber(m?.value ?? m?.stat?.value);
+      const key = idToName.get(id) || id;
+      if (val !== undefined) scoring[key] = val;
+    }
+    if (Object.keys(scoring).length) out.scoring = scoring;
+
+    return out;
+  } catch {
+    return {} as NormalizedLeagueSettings;
+  }
+}

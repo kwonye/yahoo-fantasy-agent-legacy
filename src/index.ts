@@ -7,11 +7,11 @@ import cookieParser from 'cookie-parser';
 import { router } from './routes.js';
 import { scheduleJobs } from './scheduler.js';
 import { logger } from './logger.js';
-import { config, assertSecrets } from './config.js';
+import { config } from './config.js';
 import { setNewsProvider } from './news/newsProvider.js';
 import { SleeperNewsProvider } from './news/sleeperProvider.js';
+import { exchangeEnvAuthCodeIfPresent } from './clients/yahooAuth.js';
 
-assertSecrets();
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
@@ -32,6 +32,12 @@ app.listen(httpPort, () => {
   logger.info(`HTTP server listening on http://localhost:${httpPort}`);
   if (config.newsProvider === 'sleeper') setNewsProvider(new SleeperNewsProvider());
   scheduleJobs();
+  // Optional: attempt one-time env auth code exchange on startup
+  exchangeEnvAuthCodeIfPresent().then((used) => {
+    if (used) {
+      logger.info('YAHOO_AUTH_CODE was used to obtain tokens.');
+    }
+  });
 });
 
 function ensureSelfSignedCert(): { keyFile: string; certFile: string } | null {

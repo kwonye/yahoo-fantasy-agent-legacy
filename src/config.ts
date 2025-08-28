@@ -14,6 +14,7 @@ export type Config = {
   yahooClientId: string;
   yahooClientSecret: string;
   yahooRedirectUri: string;
+  yahooScope: 'fspt-w' | 'fspt-r';
   leagueKey?: string; // e.g., 'nfl.l.12345'
   teamKey?: string; // e.g., 'nfl.l.12345.t.1'
   geminiApiKey?: string;
@@ -47,6 +48,7 @@ export const config: Config = {
   yahooClientId: process.env.YAHOO_CLIENT_ID || '',
   yahooClientSecret: process.env.YAHOO_CLIENT_SECRET || '',
   yahooRedirectUri: process.env.YAHOO_REDIRECT_URI || 'https://localhost:3443/auth/callback',
+  yahooScope: (process.env.YAHOO_SCOPE as any) || 'fspt-w',
   leagueKey: process.env.YAHOO_LEAGUE_KEY,
   teamKey: process.env.YAHOO_TEAM_KEY,
   geminiApiKey: process.env.GEMINI_API_KEY,
@@ -61,22 +63,48 @@ export const config: Config = {
   },
   newsProvider: (process.env.NEWS_PROVIDER as any) || 'sleeper',
   manager: {
-    faabBudget: Number(process.env.FAAB_BUDGET ?? localManager.faabBudget ?? 100),
+    faabBudget: Number(localManager.faabBudget ?? 100),
     weeklyFaabMax: localManager.weeklyFaabMax,
     waiverProcessTime: localManager.waiverProcessTime,
-    aggressiveness: Number(process.env.MGR_AGGRESSIVENESS ?? localManager.aggressiveness ?? 0.5),
-    injuryRiskTolerance: Number(process.env.MGR_INJURY_RISK ?? localManager.injuryRiskTolerance ?? 0.4),
+    aggressiveness: Number(localManager.aggressiveness ?? 0.5),
+    injuryRiskTolerance: Number(localManager.injuryRiskTolerance ?? 0.4),
     positionPriority: localManager.positionPriority ?? { RB: 1.0, WR: 0.95, QB: 0.8, TE: 0.7, K: 0.2, DEF: 0.3 },
   },
 };
 
-export function assertSecrets() {
+/**
+ * Ensure Yahoo OAuth env vars exist. Does NOT require a Gemini API key.
+ */
+export function assertYahooSecrets() {
   const missing: string[] = [];
   if (!config.yahooClientId) missing.push('YAHOO_CLIENT_ID');
   if (!config.yahooClientSecret) missing.push('YAHOO_CLIENT_SECRET');
   if (!config.yahooRedirectUri) missing.push('YAHOO_REDIRECT_URI');
-  if (!config.geminiApiKey) missing.push('GEMINI_API_KEY');
+
   if (missing.length) {
+    console.error('\n🚨 SETUP REQUIRED (Yahoo) 🚨');
+    console.error('Missing required environment variables:');
+    missing.forEach(key => console.error(`  - ${key}`));
+    console.error('\nPlease check the README.md for setup instructions.');
+    console.error('You need to:');
+    console.error('1. Create a Yahoo Developer app at https://developer.yahoo.com/apps/');
+    console.error('2. Find your Yahoo league and team keys from your fantasy league URL');
+    console.error('3. Copy .env.example to .env and fill in your values\n');
     throw new Error(`Missing required env vars: ${missing.join(', ')}`);
   }
 }
+
+/**
+ * Ensure Gemini API key exists for AI features.
+ */
+export function assertGeminiSecret() {
+  if (!config.geminiApiKey) {
+    console.error('\n🚨 SETUP REQUIRED (Gemini) 🚨');
+    console.error('Missing required environment variable: GEMINI_API_KEY');
+    console.error('Get a Gemini API key from https://aistudio.google.com/ and set GEMINI_API_KEY in your .env');
+    throw new Error('Missing required env vars: GEMINI_API_KEY');
+  }
+}
+
+// Backward-compat alias for any legacy imports
+export const assertSecrets = assertYahooSecrets;

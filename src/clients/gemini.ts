@@ -1,7 +1,7 @@
 // Thin wrapper around Gemini for strategy decisions.
 // Uses @google/generative-ai if available; otherwise, falls back to REST fetch.
 
-import { config, assertSecrets } from '../config.js';
+import { config, assertGeminiSecret } from '../config.js';
 import { logger } from '../logger.js';
 
 type ModelClient = {
@@ -36,7 +36,7 @@ let singleton: ModelClient | null = null;
 
 export function getModel(): ModelClient {
   if (singleton) return singleton;
-  assertSecrets(); // ensure GEMINI_API_KEY and Yahoo vars exist
+  assertGeminiSecret();
   singleton = new GeminiClient(config.geminiApiKey!);
   return singleton;
 }

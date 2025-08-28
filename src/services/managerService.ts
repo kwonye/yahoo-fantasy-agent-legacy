@@ -5,6 +5,7 @@ import { proposeTradeFromContext } from '../strategies/trades.js';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { extractLeagueTeams, mapFreeAgentsFromLeaguePlayersResponse, mapPlayersFromRosterResponse } from '../clients/yahooParsers.js';
+import { getEffectiveLeagueSettings } from '../util/leagueSettings.js';
 
 function toXml(obj: any): string {
   // Minimal XML helper for Yahoo write endpoints; replace with robust lib if needed.
@@ -20,7 +21,8 @@ export async function runLineup(): Promise<{ applied: boolean; rationale: string
   const rosterRaw = await getTeamRoster(config.teamKey);
   const matchup = await getMatchups(config.teamKey);
   const roster = mapPlayersFromRosterResponse(rosterRaw);
-  const decision = await decideLineup(roster, matchup);
+  const { effective } = await getEffectiveLeagueSettings();
+  const decision = await decideLineup(roster, matchup, effective);
   if (!decision.moves.length) return { applied: false, rationale: decision.rationale };
   // Build XML for lineup changes
   const payload = `<?xml version="1.0" encoding="UTF-8"?>` +
@@ -39,7 +41,8 @@ export async function runWaivers(): Promise<{ applied: boolean; rationale: strin
   ]);
   const freeAgents = mapFreeAgentsFromLeaguePlayersResponse(faRaw);
   const roster = mapPlayersFromRosterResponse(rosterRaw);
-  const decision = await decideWaiverAction(freeAgents, roster);
+  const { effective } = await getEffectiveLeagueSettings();
+  const decision = await decideWaiverAction(freeAgents, roster, effective);
   if (!decision) return null;
   const payload = `<?xml version="1.0" encoding="UTF-8"?>` +
     `<fantasy_content>${toXml({ transactions: { transaction: { type: 'add/drop', players: { player: [
@@ -71,7 +74,8 @@ export async function runTrade(): Promise<{ proposed: boolean; message?: string 
     }
   }
 
-  const proposal = await proposeTradeFromContext(myRoster, otherTeams);
+  const { effective } = await getEffectiveLeagueSettings();
+  const proposal = await proposeTradeFromContext(myRoster, otherTeams, effective);
   if (!proposal) return null;
   const payload = `<?xml version="1.0" encoding="UTF-8"?>` +
     `<fantasy_content>${toXml({ transactions: { transaction: { type: 'trade', trader_team_key: config.teamKey, trade: {
