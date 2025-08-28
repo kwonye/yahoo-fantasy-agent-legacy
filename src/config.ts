@@ -46,7 +46,7 @@ const localManager = loadLocalManagerConfig();
 export const config: Config = {
   yahooClientId: process.env.YAHOO_CLIENT_ID || '',
   yahooClientSecret: process.env.YAHOO_CLIENT_SECRET || '',
-  yahooRedirectUri: process.env.YAHOO_REDIRECT_URI || 'http://localhost:3000/auth/callback',
+  yahooRedirectUri: process.env.YAHOO_REDIRECT_URI || 'https://localhost:3443/auth/callback',
   leagueKey: process.env.YAHOO_LEAGUE_KEY,
   teamKey: process.env.YAHOO_TEAM_KEY,
   geminiApiKey: process.env.GEMINI_API_KEY,

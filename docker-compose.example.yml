@@ -9,6 +9,7 @@ services:
       - .env
     ports:
       - "3000:3000"
+      - "3443:3443"
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro

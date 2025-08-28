@@ -1,102 +1,58 @@
 # Yahoo Fantasy Bot
 
-Service that manages a Yahoo Fantasy Football team using the Yahoo Fantasy Sports API and Gemini for strategy suggestions (lineup, waivers, trades).
+Containerized service that manages a Yahoo Fantasy Football team using the Yahoo Fantasy Sports API and Gemini. This guide covers a full autonomous install and run using Docker only.
 
-## Quick Start
+## Prerequisites
 
-1) Copy `.env.example` to `.env` and fill values.
+- Docker and Docker Compose installed.
+- Yahoo Developer app (Web Application) with client ID/secret. Yahoo requires an HTTPS redirect URI.
+- Gemini API key from Google AI Studio.
 
-- `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET`: Create an app at https://developer.yahoo.com/apps/ (Web Application). Set the redirect URI to `http://localhost:3000/auth/callback`.
-- `YAHOO_LEAGUE_KEY` and `YAHOO_TEAM_KEY`: From your Yahoo Fantasy URLs, e.g. `nfl.l.12345` and `nfl.l.12345.t.7`.
-- `GEMINI_API_KEY`: REQUIRED. From Google AI Studio (https://aistudio.google.com/).
+## Configure
 
-2) Optional: configure manager preferences by copying `config/app.config.example.json` to `config/app.config.json` and editing values (FAAB budget, waiver time, aggressiveness, position priorities). Env vars in `.env` override file values.
+- .env: copy `.env.example` to `.env` and fill required values:
+  - `YAHOO_CLIENT_ID`, `YAHOO_CLIENT_SECRET`, `YAHOO_REDIRECT_URI`
+  - `YAHOO_LEAGUE_KEY`, `YAHOO_TEAM_KEY`
+  - `GEMINI_API_KEY`
+  - `TZ` and cron vars
+- Manager settings (optional): copy `config/app.config.example.json` to `config/app.config.json` and tweak preferences. Env vars in `.env` override file values.
 
-3) Install deps and run the server.
+## Run (Docker Compose)
+
+- Copy `docker-compose.example.yml` to `docker-compose.yml` and adjust as needed, then start:
 
 ```bash
-npm install
-npm run dev
+docker compose up -d --build
+docker compose logs -f
 ```
 
-4) Authenticate with Yahoo:
+## First-Time Auth
 
-- Visit `http://localhost:3000/auth/login` and complete the OAuth flow.
-- Verify tokens saved: `GET http://localhost:3000/config` should show `hasTokens: true`.
+- Default local HTTPS is enabled out-of-the-box on port `3443` using a self-signed certificate (auto-generated in `data/ssl`).
+- Set your Yahoo app redirect to: `https://localhost:3443/auth/callback` (matches the default `.env`).
+- Start the service: `docker compose up -d --build`
+- In your browser:
+  - Open `http://localhost:3000/auth/login` (HTTP is fine for starting the flow).
+  - After Yahoo login, you will be redirected to `https://localhost:3443/auth/callback`.
+  - Your browser may warn about the self-signed cert; continue to proceed.
+  - Check `http://localhost:3000/config` shows `hasTokens: true`.
+- After tokens exist, the container runs autonomously on the configured schedule. Set `AUTO_ENABLE=true` to also enable the news polling loop.
 
-## Endpoints
+## HTTPS Redirect Options
 
-- `GET /health` – service liveness.
-- `GET /auth/login` – start Yahoo OAuth.
-- `GET /auth/callback` – finish OAuth; tokens stored in `data/tokens.json`.
-- `GET /config` – show league/team keys and token presence.
-- `POST /actions/lineup` – AI-assisted lineup set. Applies changes via Yahoo API.
-- `POST /actions/waivers` – AI-assisted waiver add/drop (stubbed free-agent fetch).
-- `POST /actions/trades` – AI-assisted trade proposal creation (sends transaction).
-- `POST /actions/run-all` – runs lineup, waivers, trades sequentially.
+Out of the box, the container provides a self-signed HTTPS endpoint on `https://localhost:3443` suitable for Yahoo OAuth redirects. Alternatives:
 
-## Scheduler
+- Custom local certs: Provide `SSL_CERT_PATH` and `SSL_KEY_PATH` in `.env` and set `HTTPS_PORT` as needed. Update `YAHOO_REDIRECT_URI` to match.
+- Tunnel: Use an HTTPS tunnel to forward to your container (ngrok, Cloudflare Tunnel). Set `YAHOO_REDIRECT_URI` to the tunnel URL + `/auth/callback` and add it in the Yahoo app settings.
 
-Automation runs via cron + a news poller. Set `AUTO_ENABLE=true` in `.env`.
+Important: The `YAHOO_REDIRECT_URI` must exactly match one of the Redirect URIs in your Yahoo Developer app.
 
-- `LINEUP_CRON` (default `*/10 * * * *`): frequent lineup checks.
-- `WAIVER_CRON` (default `5 3 * * *`): after waivers process.
-- `TRADE_CRON` (default `0 9 * * *`): daily trade attempt time.
-- `DAILY_CRON` (default `0 8 * * *`): daily maintenance.
-- `NEWS_POLL_MIN` (default `5`): minutes between news polls.
-- `NEWS_PROVIDER` (default `sleeper`): news source. Options: `sleeper`, `noop`.
+## Updating
 
-All cron jobs use timezone from `TZ`.
-
-## Notes and Next Steps
-
-- Write operations to Yahoo require XML payloads; minimal helpers included. For production, consider a robust XML builder.
-- The Yahoo Fantasy API returns XML by default; this project requests JSON via `Accept: application/json` where supported, but some responses may still need XML parsing enhancements.
-- Strategy modules (`src/strategies/*`) require Gemini and produce concise JSON. Tighten prompts and guardrails as you gain data and add constraints.
-- News reactions are stubbed via `src/news/newsProvider.ts`. Plug in a real provider (Sleeper, FantasyPros, NBC Edge) and return items with player names/headlines/timestamps to trigger lineup reevaluation.
-
-## Development
-
-- TypeScript, Express, Axios, node-cron.
-- Tokens are stored in `data/tokens.json` (git-ignored). Consider moving to a proper DB.
-
-## Tests
-
-- Run unit tests: `npm test`
-- Watch mode: `npm run test:watch`
-- Covered areas: config secrets validation, Yahoo response mappers, mutex exclusivity, and Sleeper news matching.
-
-## Run Continuously
-
-Options:
-
-- Docker: `docker build -t yahoo-fantasy-bot . && docker run --env-file .env -p 3000:3000 --restart unless-stopped -v $(pwd)/data:/app/data -v $(pwd)/config:/app/config:ro yahoo-fantasy-bot`
-- PM2: `npm i -g pm2` then `pm2 start npm --name yahoo-fantasy-bot -- run dev` and `pm2 save`.
-- systemd (example):
-
-```
-[Unit]
-Description=Yahoo Fantasy Bot
-After=network.target
-
-[Service]
-Environment=PORT=3000
-EnvironmentFile=/path/to/.env
-WorkingDirectory=/path/to/yahoo-fantasy-bot
-ExecStart=/usr/bin/npm run dev
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable: `sudo systemctl enable --now yahoo-fantasy-bot.service`
-
-## Docker Compose
-
-See `docker-compose.example.yml`. Copy to `docker-compose.yml`, adjust, then run:
+- Rebuild and restart:
 
 ```bash
 docker compose up -d --build
 ```
+
+- Volumes keep tokens and config across updates.
