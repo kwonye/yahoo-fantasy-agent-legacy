@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import fs from 'fs';
 import path from 'path';
 
@@ -76,6 +78,7 @@ export const config: Config = {
  * Ensure Yahoo OAuth env vars exist. Does NOT require a Gemini API key.
  */
 export function assertYahooSecrets() {
+  console.log('config.yahooClientId:', config.yahooClientId); // Added console.log
   const missing: string[] = [];
   if (!config.yahooClientId) missing.push('YAHOO_CLIENT_ID');
   if (!config.yahooClientSecret) missing.push('YAHOO_CLIENT_SECRET');
@@ -86,10 +89,7 @@ export function assertYahooSecrets() {
     console.error('Missing required environment variables:');
     missing.forEach(key => console.error(`  - ${key}`));
     console.error('\nPlease check the README.md for setup instructions.');
-    console.error('You need to:');
-    console.error('1. Create a Yahoo Developer app at https://developer.yahoo.com/apps/');
-    console.error('2. Find your Yahoo league and team keys from your fantasy league URL');
-    console.error('3. Copy .env.example to .env and fill in your values\n');
+    console.error('You need to:\n1. Create a Yahoo Developer app at https://developer.yahoo.com/apps/\n2. Find your Yahoo league and team keys from your fantasy league URL\n3. Copy .env.example to .env and fill in your values\n');
     throw new Error(`Missing required env vars: ${missing.join(', ')}`);
   }
 }

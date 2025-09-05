@@ -34,3 +34,24 @@ export function saveTokens(tokens: Omit<TokenBundle, 'obtained_at'>) {
   }
 }
 
+const codeVerifierPath = path.join(dataDir, 'code_verifier.json');
+
+export function saveCodeVerifier(codeVerifier: string) {
+  try {
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(codeVerifierPath, JSON.stringify({ codeVerifier }, null, 2));
+    logger.info('Saved code verifier to disk');
+  } catch (err) {
+    logger.error('Failed to save code verifier', err);
+  }
+}
+
+export function loadCodeVerifier(): string | null {
+  try {
+    const raw = fs.readFileSync(codeVerifierPath, 'utf-8');
+    return JSON.parse(raw).codeVerifier as string;
+  } catch (err) {
+    return null;
+  }
+}
+

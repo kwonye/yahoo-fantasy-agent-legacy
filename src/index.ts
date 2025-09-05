@@ -10,9 +10,8 @@ import { logger } from './logger.js';
 import { config } from './config.js';
 import { setNewsProvider } from './news/newsProvider.js';
 import { SleeperNewsProvider } from './news/sleeperProvider.js';
-import { exchangeEnvAuthCodeIfPresent } from './clients/yahooAuth.js';
 
-const app = express();
+export const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
@@ -22,25 +21,7 @@ app.get('/health', (_req, res) => {
 
 app.use('/', router);
 
-const httpPort = Number(process.env.PORT || 3000);
-const httpsPort = Number(process.env.HTTPS_PORT || 3443);
-const keyPath = process.env.SSL_KEY_PATH;
-const certPath = process.env.SSL_CERT_PATH;
-
-// Always start HTTP server (healthcheck and local access)
-app.listen(httpPort, () => {
-  logger.info(`HTTP server listening on http://localhost:${httpPort}`);
-  if (config.newsProvider === 'sleeper') setNewsProvider(new SleeperNewsProvider());
-  scheduleJobs();
-  // Optional: attempt one-time env auth code exchange on startup
-  exchangeEnvAuthCodeIfPresent().then((used) => {
-    if (used) {
-      logger.info('YAHOO_AUTH_CODE was used to obtain tokens.');
-    }
-  });
-});
-
-function ensureSelfSignedCert(): { keyFile: string; certFile: string } | null {
+export function ensureSelfSignedCert(): { keyFile: string; certFile: string } | null {
   try {
     const sslDir = path.join(process.cwd(), 'data', 'ssl');
     const keyFile = path.join(sslDir, 'localhost-key.pem');
@@ -62,34 +43,48 @@ function ensureSelfSignedCert(): { keyFile: string; certFile: string } | null {
   }
 }
 
-// Optionally start HTTPS server for OAuth callback
-const shouldEnableHttps =
-  !!(keyPath && certPath) ||
-  process.env.ENABLE_SELF_SIGNED_TLS === 'true' ||
-  config.yahooRedirectUri?.startsWith('https://localhost:');
+export function startServer() {
+  const httpPort = Number(process.env.PORT || 3000);
+  const httpsPort = Number(process.env.HTTPS_PORT || 3443);
+  const keyPath = process.env.SSL_KEY_PATH;
+  const certPath = process.env.SSL_CERT_PATH;
 
-if (shouldEnableHttps) {
-  let finalKey = keyPath;
-  let finalCert = certPath;
-  if (!finalKey || !finalCert) {
-    const generated = ensureSelfSignedCert();
-    if (generated) {
-      finalKey = generated.keyFile;
-      finalCert = generated.certFile;
+  // Always start HTTP server (healthcheck and local access)
+  app.listen(httpPort, () => {
+    logger.info(`HTTP server listening on http://localhost:${httpPort}`);
+    if (config.newsProvider === 'sleeper') setNewsProvider(new SleeperNewsProvider());
+    scheduleJobs();
+  });
+
+  // Optionally start HTTPS server for OAuth callback
+  const shouldEnableHttps =
+    !!(keyPath && certPath) ||
+    process.env.ENABLE_SELF_SIGNED_TLS === 'true' ||
+    config.yahooRedirectUri?.startsWith('https://localhost:');
+
+  if (shouldEnableHttps) {
+    let finalKey = keyPath;
+    let finalCert = certPath;
+    if (!finalKey || !finalCert) {
+      const generated = ensureSelfSignedCert();
+      if (generated) {
+        finalKey = generated.keyFile;
+        finalCert = generated.certFile;
+      }
     }
-  }
-  if (finalKey && finalCert) {
-    const httpsServer = https.createServer(
-      {
-        key: fs.readFileSync(finalKey),
-        cert: fs.readFileSync(finalCert),
-      },
-      app,
-    );
-    httpsServer.listen(httpsPort, () => {
-      logger.info(`HTTPS server listening on https://localhost:${httpsPort}`);
-    });
-  } else {
-    logger.warn('HTTPS not started: missing SSL cert/key and self-signed generation failed.');
+    if (finalKey && finalCert) {
+      const httpsServer = https.createServer(
+        {
+          key: fs.readFileSync(finalKey),
+          cert: fs.readFileSync(finalCert),
+        },
+        app,
+      );
+      httpsServer.listen(httpsPort, () => {
+        logger.info(`HTTPS server listening on https://localhost:${httpsPort}`);
+      });
+    } else {
+      logger.warn('HTTPS not started: missing SSL cert/key and self-signed generation failed.');
+    }
   }
 }

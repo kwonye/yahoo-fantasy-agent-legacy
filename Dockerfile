@@ -10,4 +10,4 @@ RUN npm run build
 ENV NODE_ENV=production
 EXPOSE 3000
 EXPOSE 3443
-CMD ["node","dist/index.js"]
+CMD ["node","dist/start.js"]

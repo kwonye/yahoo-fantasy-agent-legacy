@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node -r dotenv/config dist/start.js",
     "build": "tsc -p tsconfig.json",
     "lint": "echo 'add eslint if desired'",
     "test": "vitest run",
@@ -14,14 +14,17 @@
   "dependencies": {
     "axios": "^1.7.2",
     "cookie-parser": "^1.4.6",
+    "dotenv": "^17.2.2",
     "express": "^4.19.2",
     "node-cron": "^3.0.3",
-    "qs": "^6.12.1"
+    "qs": "^6.12.1",
+    "open": "^8.4.0"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.7",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.9",
+    "@types/open": "^6.0.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5",
