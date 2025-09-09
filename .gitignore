@@ -27,6 +27,8 @@ Thumbs.db
 
 # Logs
 logs/
+# Sensitive files
+.secure/
 *.log
 
 # Coverage
