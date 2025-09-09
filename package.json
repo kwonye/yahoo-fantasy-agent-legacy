@@ -1,36 +1,53 @@
 {
-  "name": "yahoo-fantasy-bot",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
+  "name": "fantasy-football-bot",
+  "version": "1.0.0",
+  "description": "Automated fantasy football bot using Yahoo Fantasy Sports API and Gemini AI",
+  "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "start": "node -r dotenv/config dist/start.js",
-    "build": "tsc -p tsconfig.json",
-    "lint": "echo 'add eslint if desired'",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon --signal SIGTERM --ext ts,json --watch src --ignore logs --exec \"ts-node src/index.ts\"",
+    "bot": "ts-node src/tools/runBot.ts once",
+    "bot:schedule": "ts-node src/tools/runBot.ts schedule",
+    "demo": "ts-node src/tools/demoYahoo.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "web": "ts-node src/web/server.ts",
+    "web:dev": "nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"ts-node src/web/server.ts\""
+  },
+  "keywords": [
+    "fantasy-football",
+    "automation",
+    "yahoo-api",
+    "gemini-ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@types/supertest": "^6.0.3",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "axios-mock-adapter": "^1.22.0",
+    "eslint": "^8.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "jest": "^29.5.0",
+    "nodemon": "^3.1.10",
+    "prettier": "^3.0.0",
+    "supertest": "^6.3.4",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
   },
   "dependencies": {
-    "axios": "^1.7.2",
-    "cookie-parser": "^1.4.6",
-    "dotenv": "^17.2.2",
-    "express": "^4.19.2",
-    "node-cron": "^3.0.3",
-    "qs": "^6.12.1",
-    "open": "^8.4.0"
-  },
-  "devDependencies": {
-    "@types/cookie-parser": "^1.4.7",
-    "@types/express": "^4.17.21",
-    "@types/node": "^20.14.9",
-    "@types/open": "^6.0.0",
-    "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.4.5",
-    "vitest": "^2.0.5"
-  },
-  "engines": {
-    "node": ">=22.18.0 <23"
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.0",
+    "express": "^4.19.2"
   }
 }

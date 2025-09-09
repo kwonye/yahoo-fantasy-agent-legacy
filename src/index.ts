@@ -1,90 +1,78 @@
-import express from 'express';
-import https from 'https';
-import fs from 'fs';
-import path from 'path';
-import { execSync } from 'child_process';
-import cookieParser from 'cookie-parser';
-import { router } from './routes.js';
-import { scheduleJobs } from './scheduler.js';
-import { logger } from './logger.js';
-import { config } from './config.js';
-import { setNewsProvider } from './news/newsProvider.js';
-import { SleeperNewsProvider } from './news/sleeperProvider.js';
+// Main entry point for the Fantasy Football Bot
+import dotenv from 'dotenv';
+import { ConfigManager } from './services';
 
-export const app = express();
-app.use(express.json());
-app.use(cookieParser());
+dotenv.config();
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true });
-});
-
-app.use('/', router);
-
-export function ensureSelfSignedCert(): { keyFile: string; certFile: string } | null {
-  try {
-    const sslDir = path.join(process.cwd(), 'data', 'ssl');
-    const keyFile = path.join(sslDir, 'localhost-key.pem');
-    const certFile = path.join(sslDir, 'localhost.pem');
-    if (fs.existsSync(keyFile) && fs.existsSync(certFile)) {
-      return { keyFile, certFile };
-    }
-    fs.mkdirSync(sslDir, { recursive: true });
-    // Generate self-signed cert valid for localhost using openssl
-    // CN=localhost, 365 days, RSA 2048
-    execSync(
-      `openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ${keyFile} -out ${certFile} -subj "/CN=localhost"`,
-      { stdio: 'ignore' },
-    );
-    return { keyFile, certFile };
-  } catch (err) {
-    logger.warn('Failed to generate self-signed cert (openssl missing?)');
-    return null;
-  }
+function mask(val?: string): string {
+  if (!val) return '';
+  if (val.length <= 6) return '*'.repeat(val.length);
+  return `${val.slice(0, 3)}***${val.slice(-3)}`;
 }
 
-export function startServer() {
-  const httpPort = Number(process.env.PORT || 3000);
-  const httpsPort = Number(process.env.HTTPS_PORT || 3443);
-  const keyPath = process.env.SSL_KEY_PATH;
-  const certPath = process.env.SSL_CERT_PATH;
+async function main() {
+  console.log('Fantasy Football Bot starting...');
 
-  // Always start HTTP server (healthcheck and local access)
-  app.listen(httpPort, () => {
-    logger.info(`HTTP server listening on http://localhost:${httpPort}`);
-    if (config.newsProvider === 'sleeper') setNewsProvider(new SleeperNewsProvider());
-    scheduleJobs();
+  const mgr = new ConfigManager();
+  // Load bot configuration (with defaults and validation)
+  let botCfg;
+  try {
+    botCfg = mgr.getBotConfig();
+  } catch (err) {
+    console.error('Invalid bot configuration:', err);
+    process.exitCode = 1;
+    return;
+  }
+  console.log('Bot configuration loaded:', {
+    riskTolerance: botCfg.riskTolerance,
+    tradingEnabled: botCfg.tradingEnabled,
+    waiverWireEnabled: botCfg.waiverWireEnabled,
+    maxWaiverClaims: botCfg.maxWaiverClaims,
+    tradeThreshold: botCfg.tradeThreshold,
+    applyChanges: botCfg.applyChanges,
   });
 
-  // Optionally start HTTPS server for OAuth callback
-  const shouldEnableHttps =
-    !!(keyPath && certPath) ||
-    process.env.ENABLE_SELF_SIGNED_TLS === 'true' ||
-    config.yahooRedirectUri?.startsWith('https://localhost:');
+  const hasSecureStore = !!process.env.CONFIG_ENCRYPTION_KEY;
+  if (hasSecureStore) {
+    console.log('Secure credential storage: enabled');
+    // Try load encrypted creds; if missing, bootstrap from env
+    try {
+      const yahoo = mgr.loadYahooCredentials();
+      const gemini = mgr.loadGeminiCredentials();
 
-  if (shouldEnableHttps) {
-    let finalKey = keyPath;
-    let finalCert = certPath;
-    if (!finalKey || !finalCert) {
-      const generated = ensureSelfSignedCert();
-      if (generated) {
-        finalKey = generated.keyFile;
-        finalCert = generated.certFile;
+      if (!yahoo || !gemini) {
+        try {
+          const envCreds = mgr.getEnvCredentials();
+          if (!yahoo) {
+            mgr.saveYahooCredentials(envCreds.yahoo);
+            console.log('Yahoo credentials bootstrapped to secure store (clientId=%s)', mask(envCreds.yahoo.clientId));
+          }
+          if (!gemini) {
+            mgr.saveGeminiCredentials(envCreds.gemini);
+            console.log('Gemini API key bootstrapped to secure store (apiKey=%s)', mask(envCreds.gemini.apiKey));
+          }
+        } catch (e) {
+          console.warn('Could not bootstrap credentials from environment:', (e as Error).message);
+          console.warn('Set YAHOO_CLIENT_ID/YAHOO_CLIENT_SECRET and GEMINI_API_KEY to bootstrap.');
+        }
       }
+    } catch (e) {
+      console.error('Secure store error:', e);
     }
-    if (finalKey && finalCert) {
-      const httpsServer = https.createServer(
-        {
-          key: fs.readFileSync(finalKey),
-          cert: fs.readFileSync(finalCert),
-        },
-        app,
-      );
-      httpsServer.listen(httpsPort, () => {
-        logger.info(`HTTPS server listening on https://localhost:${httpsPort}`);
-      });
-    } else {
-      logger.warn('HTTPS not started: missing SSL cert/key and self-signed generation failed.');
+  } else {
+    console.log('Secure credential storage: disabled (set CONFIG_ENCRYPTION_KEY to enable)');
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('Missing GEMINI_API_KEY');
+    }
+    if (!process.env.YAHOO_CLIENT_ID || !process.env.YAHOO_CLIENT_SECRET) {
+      console.warn('Missing YAHOO_CLIENT_ID and/or YAHOO_CLIENT_SECRET');
     }
   }
+
+  // App ready; subsequent tasks will orchestrate bot operations
 }
+
+main().catch((err) => {
+  console.error('Fatal error:', err);
+  process.exitCode = 1;
+});

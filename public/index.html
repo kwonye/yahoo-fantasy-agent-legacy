@@ -1,0 +1,1119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fantasy Bot Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg: #fff7fb;            /* pastel pink 50 */
+        --bg-2: #f7f1ff;          /* pastel purple 50 */
+        --fg: #2b2233;            /* deep eggplant for readability */
+        --card: #ffffff;
+        --border: #f0e6f6;
+        --muted: #8b6f9e;
+        --accent-pink: #ff7ab8;
+        --accent-pink-2: #ffc2dd;
+        --accent-purple: #a78bfa;
+        --accent-purple-2: #dec9ff;
+        --danger: #ff8da1;
+      }
+      body {
+        padding: 16px;
+        background: radial-gradient(1200px 600px at 20% -10%, var(--bg) 0%, var(--bg) 60%),
+                    radial-gradient(1000px 500px at 110% 10%, var(--bg-2) 0%, var(--bg-2) 50%),
+                    linear-gradient(180deg, var(--bg), var(--bg-2));
+        color: var(--fg);
+        font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+        font-size: 16px;
+      }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 13px; }
+      .navbar { background: linear-gradient(180deg, var(--bg-2), var(--bg)); }
+      .navbar-brand { font-weight: 600; color: var(--accent-purple); }
+      .card { background: var(--card); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(167,139,250,0.08); border-radius: 14px; }
+      .card-header { background: linear-gradient(180deg, #faf5ff, #fff0f7); border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+      .form-control, .form-select { background: #fff; color: var(--fg); border-radius: 10px; border-color: var(--border); }
+      .form-control:focus, .form-select:focus { box-shadow: 0 0 0 .2rem rgba(167,139,250,.18); border-color: var(--accent-purple); }
+      .btn-primary { background: var(--accent-pink); border-color: var(--accent-pink); }
+      .btn-primary:hover { background: #ff6aa7; border-color: #ff6aa7; }
+      .btn-outline-secondary { color: var(--accent-purple); border-color: var(--accent-purple); }
+      .btn-outline-secondary:hover { background: var(--accent-purple); color: #fff; }
+      .btn-outline-danger { color: var(--danger); border-color: var(--danger); }
+      .btn-outline-danger:hover { background: var(--danger); color: #fff; }
+      .badge.bg-secondary { background-color: var(--accent-purple-2) !important; color: var(--fg) !important; }
+      .badge.bg-success { background-color: var(--accent-pink-2) !important; color: var(--fg) !important; }
+      .badge.bg-warning { background-color: #ffe6a7 !important; color: #7a5d00 !important; }
+      table.table thead { background: #faf5ff; }
+      table.table tbody tr:hover { background: #fff7fb; }
+      hr { border-top: 1px dashed var(--accent-purple-2); opacity: 1; }
+      #geminiChat pre { white-space: pre-wrap; }
+      .json-pre { background: #fff7fb; border: 1px solid var(--border); border-radius: 10px; padding: 10px; overflow: auto; }
+      .json-pre .key { color: var(--accent-purple); }
+      .json-pre .string { color: #d069a1; }
+      .json-pre .number { color: #c257d3; }
+      .json-pre .boolean { color: #a163df; }
+      .json-pre .null { color: var(--muted); }
+      .json-pre .punct { color: #b99bd8; }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg mb-3 border-bottom">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">Fantasy Football Bot</a>
+        <div class="d-flex gap-2">
+          <span class="badge bg-secondary" id="modeBadge">Mode: Dry Run</span>
+          <span class="badge bg-secondary" id="yahooBadge">Yahoo: Unknown</span>
+          <span class="badge bg-secondary" id="geminiBadge">Gemini: Unknown</span>
+          <span class="badge bg-secondary" id="quotaBadge">Quota: …</span>
+        </div>
+      </div>
+    </nav>
+    <div class="container">
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <div class="card">
+            <div class="card-header">Health</div>
+            <div class="card-body mono" id="health">Loading…</div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="card">
+            <div class="card-header">Config</div>
+            <div class="card-body mono" id="config">Loading…</div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="card">
+            <div class="card-header">Metrics</div>
+            <div class="card-body mono" id="metrics">Loading…</div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-3 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Recent Activity</span>
+              <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">Refresh</button>
+                <button class="btn btn-sm btn-outline-danger" id="clearLogsBtn">Clear Activity</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-sm table-striped mono">
+                  <thead>
+                    <tr><th>Time</th><th>Type</th><th>Details</th></tr>
+                  </thead>
+                  <tbody id="activity"></tbody>
+                </table>
+              </div>
+              <div class="text-muted small" id="lastUpdated"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Gemini Activity</span>
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <button class="btn btn-sm btn-outline-secondary" id="refreshGeminiBtn">Refresh</button>
+                <button class="btn btn-sm btn-outline-danger" id="clearGeminiBtn">Clear</button>
+              </div>
+            </div>
+            <div class="card-body" style="max-height: 360px; overflow: auto;">
+              <div id="geminiChat" class="mono"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header">Ask Gemini</div>
+            <div class="card-body">
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <div class="input-group input-group-sm" style="max-width: 640px;">
+                  <span class="input-group-text">Prompt</span>
+                  <input id="geminiTestInput" class="form-control" placeholder="Ask Gemini..." />
+                  <button class="btn btn-primary" id="geminiTestBtn" type="button">Send</button>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" id="previewLineupBtn" type="button">Preview lineup prompt</button>
+                <button class="btn btn-sm btn-outline-secondary" id="previewWaiversBtn" type="button">Preview waivers prompt</button>
+                <button class="btn btn-sm btn-outline-secondary" id="previewTradeBtn" type="button">Preview trade prompt</button>
+              </div>
+              <div class="row g-2 mt-2">
+                <div class="col-12 col-md-6">
+                  <label class="form-label small">Opponent Team #</label>
+                  <input id="theirTeamNumberInput" type="number" min="1" max="10" step="1" class="form-control form-control-sm mono" placeholder="3" />
+                </div>
+              </div>
+              <pre class="mono mt-2" id="geminiTestResult" style="white-space: pre-wrap;"></pre>
+              <pre class="mono mt-2" id="geminiPreview" style="white-space: pre-wrap; display:none;"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Current Roster</span>
+              <div class="d-flex align-items-center gap-3">
+                <div class="text-muted small" id="rosterMeta"></div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="row g-3">
+                <div class="col-12">
+                  <div class="table-responsive">
+                    <table class="table table-sm table-striped mono">
+                      <thead><tr><th>Slot</th><th>Pos</th><th>Player</th><th>Team</th></tr></thead>
+                      <tbody id="rosterCombinedTbl"></tbody>
+                    </table>
+                  </div>
+                  <div class="small" id="startersMeta"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header">Bot Configuration</div>
+            <div class="card-body">
+              <form id="cfgForm" class="mono">
+                <div class="mb-2">
+                  <label class="form-label">Risk Tolerance</label>
+                  <select id="riskTolerance" class="form-select form-select-sm">
+                    <option>CONSERVATIVE</option>
+                    <option>MODERATE</option>
+                    <option>AGGRESSIVE</option>
+                  </select>
+                </div>
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="tradingEnabled" />
+                  <label class="form-check-label" for="tradingEnabled">Trading Enabled</label>
+                </div>
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="waiverWireEnabled" />
+                  <label class="form-check-label" for="waiverWireEnabled">Waiver Wire Enabled</label>
+                </div>
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="applyChanges" />
+                  <label class="form-check-label" for="applyChanges">Apply Changes (live writes)</label>
+                </div>
+                <div class="row g-2">
+                  <div class="col-6">
+                    <label class="form-label">Max Waiver Claims</label>
+                    <input type="number" id="maxWaiverClaims" class="form-control form-control-sm" />
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label">Trade Threshold</label>
+                    <input type="number" step="0.1" id="tradeThreshold" class="form-control form-control-sm" />
+                  </div>
+                </div>
+                <div class="mt-3 d-flex gap-2">
+                  <button type="submit" class="btn btn-sm btn-primary">Save Config</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" id="resetCfgBtn">Reset</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header">Credentials</div>
+            <div class="card-body">
+              <div class="mb-2 mono" id="credsStatus" style="display:none"></div>
+              <div class="mb-3">
+                <div class="d-flex flex-wrap gap-2">
+                  <span class="badge bg-light text-dark" id="credsYahooBadge">Yahoo: Unknown</span>
+                  <span class="badge bg-light text-dark" id="credsGeminiBadge">Gemini: Unknown</span>
+                </div>
+                <div class="small text-muted mono" id="credsDetails"></div>
+              </div>
+              <form id="yahooForm" class="mono mb-3">
+                <div class="mb-2"><label class="form-label">Yahoo Client ID</label><input id="yClientId" class="form-control form-control-sm" /></div>
+                <div class="mb-2"><label class="form-label">Yahoo Client Secret</label><input id="yClientSecret" class="form-control form-control-sm" /></div>
+                <button type="submit" class="btn btn-sm btn-secondary">Save Yahoo Creds</button>
+              </form>
+              <form id="geminiForm" class="mono">
+                <div class="mb-2"><label class="form-label">Gemini API Key</label><input id="gApiKey" class="form-control form-control-sm" /></div>
+                <button type="submit" class="btn btn-sm btn-secondary">Save Gemini Key</button>
+              </form>
+              <hr/>
+              <form id="runBotForm" class="mono">
+                <div class="row g-2 mb-2">
+                  <div class="col-6"><label class="form-label">League Key</label><input id="leagueKeyInput" class="form-control form-control-sm" placeholder="nfl.l.XXXXX" /></div>
+                  <div class="col-6"><label class="form-label">Team Key</label><input id="teamKeyInput" class="form-control form-control-sm" placeholder="nfl.l.XXXXX.t.Y" /></div>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary" id="runBotBtn">Run Bot Now</button>
+              </form>
+              <!-- Daily schedule UI removed: scheduling is now managed by smart automation (waiver time + kickoff checks) -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>League Profile (Scoring & Settings)</span>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="lpLoadBtn">Load</button>
+                <button class="btn btn-sm btn-outline-primary" id="lpPrefillBtn">Prefill Sample</button>
+                <button class="btn btn-sm btn-outline-secondary" id="lpEditBtn">Edit</button>
+                <button class="btn btn-sm btn-primary" id="lpSaveBtn" style="display:none">Save</button>
+                <button class="btn btn-sm btn-outline-danger" id="lpCancelBtn" style="display:none">Cancel</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="leagueProfileView" class="mono"></div>
+              <textarea id="leagueProfileEdit" class="form-control mono" rows="12" style="display:none"></textarea>
+              <div class="small text-muted mt-2">Stored under <code>config/league_setting.json</code>. Note: when a scoring row shows <code>yahooDefault: null</code>, it means the Yahoo default equals the current league value.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-3 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header">Automation</div>
+            <div class="card-body mono">
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="kickoffEnabled" />
+                  <label class="form-check-label" for="kickoffEnabled">Enable Kickoff Checks (90/60/30 pre-windows)</label>
+                </div>
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="irAutomationEnabled" />
+                  <label class="form-check-label" for="irAutomationEnabled">Enable IR Automation (move OUT/INJ to IR; auto-activate)</label>
+                </div>
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="waiverAutomationEnabled" />
+                  <label class="form-check-label" for="waiverAutomationEnabled">Enable Auto Waivers (weekly; uses WAIVER_DAY/HOUR/MINUTE)</label>
+                </div>
+              <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
+                <label class="form-check-label" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
+              </div>
+              <button class="btn btn-sm btn-outline-success" id="saveFeaturesBtn">Save</button>
+              <div class="small text-muted mt-2" id="quotaSummary"></div>
+              <hr/>
+              <div>
+                <div class="fw-semibold">Upcoming Tasks</div>
+                <div id="upcomingTasks" class="small"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-3 mt-1">
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Incoming Trades</span>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="refreshTradesBtn">Refresh</button>
+                <button class="btn btn-sm btn-outline-secondary" id="dumpTradesBtn">Dump All</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-sm table-striped mono">
+                  <thead><tr><th>ID</th><th>Status</th><th>Actions</th></tr></thead>
+                  <tbody id="tradesTbl"></tbody>
+                </table>
+              </div>
+              <pre id="tradesDumpView" class="mono json-pre mt-2" style="display:none"></pre>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Trade Block</span>
+              <button class="btn btn-sm btn-outline-secondary" id="refreshTradeBlockBtn">Refresh</button>
+            </div>
+            <div class="card-body">
+              <div class="small text-muted">Derived automatically by Gemini from your roster and league settings.</div>
+              <pre id="tradeBlockView" class="mono json-pre mt-2"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      async function fetchJson(url) {
+        const r = await fetch(url);
+        return r.json();
+      }
+      function jsonHighlight(obj) {
+        try {
+          const json = JSON.stringify(obj ?? {}, null, 2);
+          const esc = (s) => s
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          let s = esc(json);
+          // Token highlight: strings (keys vs values), numbers, booleans, null
+          s = s.replace(/(\"(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\\"])*\"\s*:)|(\"(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\\"])*\")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g, (m, gKey, gStr, gBoolNull, gNum) => {
+            if (gKey) return '<span class="key">' + gKey + '</span>';
+            if (gStr) return '<span class="string">' + gStr + '</span>';
+            if (gBoolNull) {
+              if (gBoolNull === 'true' || gBoolNull === 'false') return '<span class="boolean">' + gBoolNull + '</span>';
+              return '<span class="null">' + gBoolNull + '</span>';
+            }
+            if (gNum) return '<span class="number">' + gNum + '</span>';
+            return m;
+          });
+          return s;
+        } catch (e) {
+          return String(obj);
+        }
+      }
+      function setJson(id, obj) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerHTML = '';
+        const pre = document.createElement('pre');
+        pre.className = 'mono json-pre';
+        pre.innerHTML = jsonHighlight(obj);
+        el.appendChild(pre);
+      }
+      function renderActivity(events) {
+        const tbody = document.getElementById('activity');
+        tbody.innerHTML = '';
+        for (const ev of events) {
+          const tr = document.createElement('tr');
+          const ts = document.createElement('td');
+          const type = document.createElement('td');
+          const details = document.createElement('td');
+          const time = new Date(ev.ts || ev.time || Date.now()).toLocaleString();
+          ts.textContent = time;
+          type.textContent = ev.type || 'log';
+          details.textContent = JSON.stringify(ev.decision || ev.error || ev.meta || ev, null, 0);
+          tr.append(ts, type, details);
+          tbody.appendChild(tr);
+        }
+      }
+      function setBadges(cfg, creds) {
+        const modeEl = document.getElementById('modeBadge');
+        if (cfg?.applyChanges) { modeEl.className='badge bg-danger'; modeEl.textContent='Mode: Live Writes'; } else { modeEl.className='badge bg-secondary'; modeEl.textContent='Mode: Dry Run'; }
+        const yb = document.getElementById('yahooBadge');
+        const gb = document.getElementById('geminiBadge');
+        const qb = document.getElementById('quotaBadge');
+        if (creds?.creds?.yahoo) { yb.className='badge bg-success'; yb.textContent='Yahoo: OK'; } else { yb.className='badge bg-warning text-dark'; yb.textContent='Yahoo: Missing'; }
+        if (creds?.creds?.gemini) { gb.className='badge bg-success'; gb.textContent='Gemini: OK'; } else { gb.className='badge bg-warning text-dark'; gb.textContent='Gemini: Missing'; }
+        if (qb) qb.className = 'badge bg-secondary';
+      }
+      function setCredsSummary(creds) {
+        const yb = document.getElementById('credsYahooBadge');
+        const gb = document.getElementById('credsGeminiBadge');
+        const details = document.getElementById('credsDetails');
+        const y = creds?.creds?.yahoo;
+        const g = creds?.creds?.gemini;
+        if (y) { yb.className='badge bg-success'; yb.textContent='Yahoo: OK'; } else { yb.className='badge bg-warning text-dark'; yb.textContent='Yahoo: Missing'; }
+        if (g) { gb.className='badge bg-success'; gb.textContent='Gemini: OK'; } else { gb.className='badge bg-warning text-dark'; gb.textContent='Gemini: Missing'; }
+        details.innerHTML = '';
+        const pre = document.createElement('pre');
+        pre.className = 'mono json-pre';
+        pre.innerHTML = jsonHighlight({ yahoo: y || null, gemini: g || null });
+        details.appendChild(pre);
+      }
+      function setMetricsSummary(m) { setJson('metrics', m?.metrics || {}); }
+      function lsGet(key, def='') { try { const v = localStorage.getItem(key); return v===null? def : v; } catch (e) { return def; } }
+      function lsSet(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+      async function fillEnvPanel() {
+        const env = await fetchJson('/api/env');
+        const leagueEl = document.getElementById('leagueKeyInput');
+        const teamEl = document.getElementById('teamKeyInput');
+        // Server defaults
+        if (leagueEl) leagueEl.value = env.leagueKey || '';
+        if (teamEl) teamEl.value = env.teamKey || '';
+        // Features
+        try {
+          document.getElementById('kickoffEnabled').checked = !!(env.features && env.features.kickoffEnabled);
+          document.getElementById('irAutomationEnabled').checked = !!(env.features && env.features.irAutomationEnabled);
+          document.getElementById('waiverAutomationEnabled').checked = !!(env.features && env.features.waiverAutomationEnabled);
+          document.getElementById('tradesAutomationEnabled').checked = !!(env.features && env.features.tradesAutomationEnabled);
+        } catch {}
+        // Overlay local preferences if present
+        const lk = lsGet('leagueKey',''); if (lk && leagueEl) leagueEl.value = lk;
+        const tk = lsGet('teamKey',''); if (tk && teamEl) teamEl.value = tk;
+      }
+      async function refresh() {
+        try {
+          setJson('health', await fetchJson('/health'));
+          const cfg = await fetchJson('/api/config'); setJson('config', (cfg && (cfg.config ?? cfg)) || {});
+          if (cfg && cfg.config) fillConfig(cfg.config);
+          loadConfigPrefs();
+          const creds = await fetchJson('/api/creds'); setCredsSummary(creds);
+          setBadges(cfg.config, creds);
+          // Quota badge and summary
+          try {
+            const q = await fetchJson('/api/quota');
+            const qb = document.getElementById('quotaBadge');
+            if (q && q.ok && qb) { qb.textContent = `Quota: ${q.remaining}/${q.limit}`; qb.className = (q.remaining>0)?'badge bg-success':'badge bg-warning text-dark'; }
+            const qs = document.getElementById('quotaSummary');
+            if (qs && q && q.ok) {
+              qs.textContent = `Remaining Gemini calls today: ${q.remaining}/${q.limit}. Calls are used by lineup optimization, waivers, trade proposals, and incoming trade evaluations, and are conserved on game days for kickoff checks.`;
+            }
+          } catch {}
+          const m = await fetchJson('/api/metrics'); setMetricsSummary(m);
+          const act = await fetchJson('/api/activity'); renderActivity(act.events || []);
+          await refreshGemini();
+          document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+          await fillEnvPanel();
+          await refreshUpcoming();
+          await refreshRoster();
+          await refreshLeagueProfile();
+          await refreshTrades();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      async function refreshUpcoming(){
+        try {
+          const r = await fetch('/api/schedule/preview');
+          const j = await r.json();
+          const box = document.getElementById('upcomingTasks');
+          if (!box) return;
+          if (!j.ok) { box.textContent = 'Error loading schedule'; return; }
+          const parts = [];
+          if (j.waiver && j.waiver.enabled) {
+            parts.push('Waivers: next run ' + new Date(j.waiver.nextRunISO).toLocaleString());
+          } else {
+            parts.push('Waivers: disabled');
+          }
+          if (j.kickoff && j.kickoff.enabled && Array.isArray(j.kickoff.upcoming)) {
+            const next = j.kickoff.upcoming.slice(0, 6).map((e) => new Date(e.runAtISO).toLocaleString() + ` (T-${e.preMinutes}m)`);
+            parts.push('Kickoff checks: ' + (next.join(', ') || 'none'));
+          } else {
+            parts.push('Kickoff checks: disabled');
+          }
+          box.textContent = parts.join('\n');
+        } catch {
+          const box = document.getElementById('upcomingTasks'); if (box) box.textContent = 'Error';
+        }
+      }
+      async function refreshTrades(){
+        try {
+          const env = await fetchJson('/api/env');
+          const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || env.leagueKey || '';
+          const teamKey = (document.getElementById('teamKeyInput') || {}).value || env.teamKey || '';
+          const r = await fetch('/api/trades/incoming?leagueKey=' + encodeURIComponent(leagueKey) + (teamKey ? ('&teamKey=' + encodeURIComponent(teamKey)) : '') + '&debug=1');
+          const j = await r.json();
+          const tbl = document.getElementById('tradesTbl');
+          tbl.innerHTML = '';
+          if (!j.ok) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td'); td.colSpan = 3; td.textContent = 'Error: ' + (j.error || 'Unknown'); tr.append(td); tbl.appendChild(tr);
+            return;
+          }
+          if (Array.isArray(j.trades) && j.trades.length > 0) {
+            j.trades.forEach((t) => {
+              const tr = document.createElement('tr');
+              const id = document.createElement('td'); id.textContent = t.id || '(unknown)';
+              const st = document.createElement('td'); st.textContent = t.status || 'pending';
+              const act = document.createElement('td');
+              const view = document.createElement('button'); view.className='btn btn-sm btn-outline-secondary me-2'; view.textContent='View'; view.onclick = ()=> alert(JSON.stringify(t, null, 2));
+              const evalBtn = document.createElement('button'); evalBtn.className='btn btn-sm btn-outline-primary me-2'; evalBtn.textContent='Evaluate'; evalBtn.onclick = ()=> evaluateTrade(leagueKey, teamKey, t.id);
+              const accept = document.createElement('button'); accept.className='btn btn-sm btn-outline-success me-2'; accept.textContent='Accept'; accept.onclick = ()=> respondTrade(leagueKey, t.id, true);
+              const decline = document.createElement('button'); decline.className='btn btn-sm btn-outline-danger'; decline.textContent='Decline'; decline.onclick = ()=> respondTrade(leagueKey, t.id, false);
+              act.append(view, evalBtn, accept, decline);
+              tr.append(id, st, act);
+              tbl.appendChild(tr);
+            });
+          } else {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td'); td.colSpan = 3; td.textContent = 'No pending trades found.'; tr.append(td); tbl.appendChild(tr);
+          }
+        } catch {}
+      }
+      async function respondTrade(leagueKey, tradeId, accept){
+        try {
+          const r = await fetch('/api/trades/respond', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ leagueKey, tradeId, accept })});
+          const j = await r.json();
+          alert(j.ok ? (accept ? 'Trade accepted' : 'Trade declined') : ('Failed: ' + (j.error||'unknown')));
+          refreshTrades();
+        } catch { alert('Error sending response'); }
+      }
+      async function evaluateTrade(leagueKey, teamKey, tradeId){
+        try {
+          if (!leagueKey || !teamKey) { alert('Set leagueKey and teamKey first.'); return; }
+          const r = await fetch('/api/trades/evaluate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ leagueKey, teamKey, tradeId })});
+          const j = await r.json();
+          if (j.ok) {
+            alert('Gemini says: ' + (j.decision.shouldAccept ? 'ACCEPT' : 'DECLINE') + '\nConfidence: ' + (Math.round((j.decision.confidence||0)*100)) + '%\nReasoning: ' + j.decision.reasoning);
+          } else {
+            alert('Evaluate failed: ' + (j.error || 'Unknown'));
+          }
+        } catch { alert('Error evaluating trade'); }
+      }
+      async function refreshTradeBlock(force){
+        try {
+          const env = await fetchJson('/api/env');
+          const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || env.leagueKey || '';
+          const teamKey = (document.getElementById('teamKeyInput') || {}).value || env.teamKey || '';
+          const r = await fetch('/api/trade-block?leagueKey=' + encodeURIComponent(leagueKey) + '&teamKey=' + encodeURIComponent(teamKey) + (force ? '&force=1' : ''));
+          const j = await r.json();
+          const view = document.getElementById('tradeBlockView');
+          if (j.ok) {
+            view.innerHTML = jsonHighlight({ needs: j.needs || [], surplus: j.surplus || [], reasoning: j.reasoning || '' });
+          } else {
+            view.textContent = 'Error: ' + (j.error || 'Unknown');
+          }
+        } catch (e) { document.getElementById('tradeBlockView').textContent = 'Error loading trade block'; }
+      }
+      // Auto-refresh disabled; updates occur only by clicking Refresh buttons
+      async function getLeagueKeyForConfig(){
+        // League Profile no longer needs a key; use env for context only
+        try { const env = await fetchJson('/api/env'); return env.leagueKey || ''; } catch { return ''; }
+      }
+      async function refreshLeagueProfile(){
+        const leagueKey = await getLeagueKeyForConfig();
+        const view = document.getElementById('leagueProfileView');
+        if (!view) return;
+        try {
+          const r = await fetchJson('/api/league-config');
+          const prof = r && r.ok !== false ? r.profile : null;
+          if (!prof) {
+            // Client-side fallback: try direct file
+            try {
+              const resp = await fetch('config/league_setting.json', { cache: 'no-store' });
+              if (resp.ok) {
+                const obj = await resp.json();
+                setJson('leagueProfileView', obj);
+                return;
+              }
+            } catch {}
+            view.innerHTML = '<div class="text-muted">No profile found yet.</div>';
+            return;
+          }
+          // Show full JSON as-is
+          setJson('leagueProfileView', prof);
+          const edit = document.getElementById('leagueProfileEdit');
+          edit.style.display = 'none'; view.style.display = 'block';
+          document.getElementById('lpSaveBtn').style.display = 'none';
+          document.getElementById('lpCancelBtn').style.display = 'none';
+        } catch(e){ view.innerHTML = '<div class="text-danger">Failed to load league profile</div>'; }
+      }
+      function sampleLeagueProfile(leagueKey){
+        const meta = { leagueId:'399238', leagueName:'DG', leagueLogo:'', customLeagueUrl:'https://football.fantasysports.yahoo.com/league/dg2', draftType:'Live Standard Draft', draftTime:'Wed Sep 3 5:45pm PDT', cashLeague:false, maxTeams:12, liveDraftPickTime:'1 Minute, 45 Seconds', scoringType:'Head-to-Head', startScoringWeek:1, cantCutListProvider:'Yahoo Sports', maxAcquisitionsSeason:null, maxAcquisitionsWeek:null, maxTradesSeason:null, tradeEndDate:'2025-11-22', allowDraftPickTrades:false, tradeReview:'Commissioner', tradeRejectTime:'2 days', waiverTime:'1 day', waiverType:'FAB w/ Reverse order of standings tiebreak', weeklyWaivers:'Game Time - Tuesday', allowInjuredAdds:true, postDraftPlayers:'Free Agents', playoffs:'4 teams - Week 16 and 17 (ends Monday, Dec 29)', playoffTieBreaker:'Best regular season record vs opponent wins', playoffReseeding:true, divisions:false, lockEliminatedTeams:true, applyInjuredStatusForPostponed:false, rosterPositions:['QB','WR','WR','WR','RB','RB','TE','W/R/T','W/R/T','K','DEF','BN','BN','BN','BN','BN','IR'], fractionalPoints:true, negativePoints:true, lockBenchedPlayers:false, publicViewable:false, invitePermissions:'All Managers Can Invite' };
+        const offense = [ {name:'Passing Yards', value:'25 yards per point; 2 points at 350 yards; 1 points at 400 yards'}, {name:'Passing Touchdowns', value:6, yahooDefault:4}, {name:'Interceptions', value:-2, yahooDefault:-1}, {name:'Rushing Yards', value:'10 yards per point; 2 points at 100 yards; 1 points at 150 yards'}, {name:'Rushing Touchdowns', value:6}, {name:'Receptions', value:1, yahooDefault:0.5}, {name:'Receiving Yards', value:'10 yards per point; 2 points at 125 yards; 1 points at 175 yards'}, {name:'Receiving Touchdowns', value:6}, {name:'Return Yards', value:'20 yards per point; 1 points at 100 yards', yahooDefault:0}, {name:'Return Touchdowns', value:6}, {name:'2-Point Conversions', value:2}, {name:'Fumbles Lost', value:-2}, {name:'Offensive Fumble Return TD', value:6} ];
+        const kickers = [ {name:'Field Goals 0-19 Yards', value:3}, {name:'Field Goals 20-29 Yards', value:3}, {name:'Field Goals 30-39 Yards', value:3}, {name:'Field Goals 40-49 Yards', value:4}, {name:'Field Goals 50+ Yards', value:5}, {name:'Field Goals Missed 0-19 Yards', value:-3, yahooDefault:0}, {name:'Field Goals Missed 20-29 Yards', value:-2, yahooDefault:0}, {name:'Field Goals Missed 30-39 Yards', value:-1, yahooDefault:0}, {name:'Field Goals Missed 40-49 Yards', value:0}, {name:'Field Goals Missed 50+ Yards', value:0} ];
+        const defense = [ {name:'Sack', value:1}, {name:'Interception', value:2}, {name:'Fumble Recovery', value:2}, {name:'Touchdown', value:6}, {name:'Safety', value:4, yahooDefault:2}, {name:'Block Kick', value:4, yahooDefault:2}, {name:'Kickoff and Punt Return Touchdowns', value:6}, {name:'Points Allowed 0 points', value:10}, {name:'Points Allowed 1-6 points', value:7}, {name:'Points Allowed 7-13 points', value:5, yahooDefault:4}, {name:'Points Allowed 14-20 points', value:2, yahooDefault:1}, {name:'Points Allowed 21-27 points', value:0}, {name:'Points Allowed 28-34 points', value:-2, yahooDefault:-1}, {name:'Points Allowed 35+ points', value:-5, yahooDefault:-4}, {name:'4th Down Stops', value:2, yahooDefault:0}, {name:'Extra Point Returned', value:2} ];
+        return { leagueKey, meta, scoring: { offense, kickers, defense } };
+      }
+      function lpEnterEdit(jsonObj){ const view=document.getElementById('leagueProfileView'); const edit=document.getElementById('leagueProfileEdit'); edit.value=JSON.stringify(jsonObj,null,2); view.style.display='none'; edit.style.display='block'; document.getElementById('lpSaveBtn').style.display='inline-block'; document.getElementById('lpCancelBtn').style.display='inline-block'; }
+      async function lpSave(){ const edit=document.getElementById('leagueProfileEdit'); const leagueKey=getLeagueKeyForConfig(); try { const obj=JSON.parse(edit.value||'{}'); obj.leagueKey=obj.leagueKey||leagueKey; const r=await fetch('/api/league-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(obj) }); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); alert('League profile saved'); await refreshLeagueProfile(); } catch(e){ alert('Save error: '+(e&&e.message?e.message:String(e))); } }
+      document.getElementById('lpLoadBtn')?.addEventListener('click', refreshLeagueProfile);
+      document.getElementById('lpPrefillBtn')?.addEventListener('click', async () => { const lk=await getLeagueKeyForConfig(); const sample=sampleLeagueProfile(lk||''); lpEnterEdit(sample); });
+      document.getElementById('lpEditBtn')?.addEventListener('click', async () => { const r=await fetchJson('/api/league-config'); const prof=r&&r.profile?r.profile:null; if (prof) lpEnterEdit(prof); else alert('No profile found yet. Use Prefill Sample to create one.'); });
+      document.getElementById('lpSaveBtn')?.addEventListener('click', lpSave);
+      document.getElementById('lpCancelBtn')?.addEventListener('click', refreshLeagueProfile);
+      async function refreshRoster() {
+        const leagueKey = document.getElementById('leagueKeyInput').value || undefined;
+        const teamKey = document.getElementById('teamKeyInput').value || undefined;
+        const q = teamKey ? `?teamKey=${encodeURIComponent(teamKey)}` : '';
+        try {
+          const data = await fetchJson('/api/roster' + q);
+          const entries = data.roster || [];
+          const starters = entries.filter(e => e.slot && e.slot !== 'BN' && e.slot !== 'IR');
+          const bench = entries.filter(e => !e.slot || e.slot === 'BN' || e.slot === 'IR');
+          const combinedTbl = document.getElementById('rosterCombinedTbl');
+          combinedTbl.innerHTML = '';
+          const addRow = (tbl, e) => {
+            const tr = document.createElement('tr');
+            const slot = document.createElement('td'); slot.textContent = e.slot || '—';
+            const pos = document.createElement('td'); pos.textContent = e.player?.position || '';
+            const name = document.createElement('td'); name.textContent = e.player?.name || '';
+            const team = document.createElement('td'); team.textContent = e.player?.team || '';
+            tr.append(slot, pos, name, team);
+            tbl.appendChild(tr);
+          };
+          // Left combined table with separator
+          starters.forEach(e => addRow(combinedTbl, e));
+          const sepTr = document.createElement('tr');
+          const sepTd = document.createElement('td'); sepTd.colSpan = 4; sepTd.innerHTML = '<hr class="m-0">';
+          sepTr.append(sepTd); combinedTbl.appendChild(sepTr);
+          bench.forEach(e => addRow(combinedTbl, e));
+          // projections/matchups section removed
+          // Meta counters
+          const countBy = (arr) => arr.reduce((m, e) => { const k = e.slot || '—'; m[k] = (m[k]||0)+1; return m; }, {});
+          const startersCounts = countBy(starters);
+          const startersMetaEl = document.getElementById('startersMeta');
+          // Compare with league settings if available
+          try {
+            const leagueKeyParam = (document.getElementById('leagueKeyInput').value || (await fetchJson('/api/env')).leagueKey);
+            if (leagueKeyParam) {
+              const lr = await fetchJson('/api/league?leagueKey=' + encodeURIComponent(leagueKeyParam));
+              const req = lr?.league?.settings?.rosterPositions || {};
+              const parts = [];
+              for (const [slot, needed] of Object.entries(req)) {
+                if (slot === 'BN' || slot === 'IR') continue;
+                const got = startersCounts[slot] || 0;
+                const ok = got >= needed;
+                const cls = ok ? 'text-success' : 'text-danger';
+                parts.push(`<span class=\"${cls}\">${slot}:${got}/${needed}</span>`);
+              }
+              startersMetaEl.innerHTML = parts.join(' ');
+            } else {
+              startersMetaEl.textContent = Object.entries(startersCounts).map(([k,v]) => `${k}:${v}`).join(' ');
+            }
+          } catch {
+            startersMetaEl.textContent = Object.entries(startersCounts).map(([k,v]) => `${k}:${v}`).join(' ');
+          }
+          document.getElementById('rosterMeta').textContent = `${entries.length} players`;
+        } catch (e) {
+          console.error('Failed to load roster', e);
+        }
+      }
+      async function refreshGemini() {
+        try {
+          const r = await fetchJson('/api/gemini/logs');
+          const chat = document.getElementById('geminiChat');
+          if (!chat) return;
+          chat.innerHTML = '';
+          const logs = r.logs || [];
+          logs.forEach((item) => {
+            const wrap = document.createElement('div'); wrap.className='mb-3';
+            const ts = document.createElement('div'); ts.className='text-muted small'; ts.textContent = new Date(item.ts).toLocaleString();
+            const sys = document.createElement('div'); sys.innerHTML = '<strong>system</strong>: ' + escapeHtml(item.system || '');
+            const user = document.createElement('div'); user.innerHTML = '<strong>user</strong>: ' + escapeHtml(item.user || '');
+            const resp = document.createElement('div'); resp.innerHTML = '<strong>assistant</strong>: ' + escapeHtml(item.response || '');
+            if (item.inputs) {
+              const det = document.createElement('details');
+              const sum = document.createElement('summary'); sum.textContent = 'Inputs (structured)';
+              const pre = document.createElement('pre'); pre.textContent = JSON.stringify(item.inputs, null, 2);
+              det.append(sum, pre);
+              wrap.append(det);
+            }
+            wrap.append(ts, sys, user, resp);
+            chat.appendChild(wrap);
+          });
+        } catch (e) { console.error('Failed to load gemini logs', e); }
+      }
+      function escapeHtml(s) { return String(s).replace(/[&<>\"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+      function loadConfigPrefs() {
+        const rt = lsGet('cfg_riskTolerance',''); if (rt) { const el=document.getElementById('riskTolerance'); if (el) el.value = rt; }
+        const te = lsGet('cfg_tradingEnabled',''); if (te) { const el=document.getElementById('tradingEnabled'); if (el) el.checked = te==='1'; }
+        const we = lsGet('cfg_waiverWireEnabled',''); if (we) { const el=document.getElementById('waiverWireEnabled'); if (el) el.checked = we==='1'; }
+        const ac = lsGet('cfg_applyChanges',''); if (ac) { const el=document.getElementById('applyChanges'); if (el) el.checked = ac==='1'; }
+        const mw = lsGet('cfg_maxWaiverClaims',''); if (mw) { const el=document.getElementById('maxWaiverClaims'); if (el) el.value = mw; }
+        const tt = lsGet('cfg_tradeThreshold',''); if (tt) { const el=document.getElementById('tradeThreshold'); if (el) el.value = tt; }
+      }
+      function saveConfigPrefs() {
+        const rt = (document.getElementById('riskTolerance')||{}).value || '';
+        const te = (document.getElementById('tradingEnabled')||{}).checked ? '1' : '0';
+        const we = (document.getElementById('waiverWireEnabled')||{}).checked ? '1' : '0';
+        const ac = (document.getElementById('applyChanges')||{}).checked ? '1' : '0';
+        const mw = (document.getElementById('maxWaiverClaims')||{}).value || '';
+        const tt = (document.getElementById('tradeThreshold')||{}).value || '';
+        lsSet('cfg_riskTolerance', rt);
+        lsSet('cfg_tradingEnabled', te);
+        lsSet('cfg_waiverWireEnabled', we);
+        lsSet('cfg_applyChanges', ac);
+        lsSet('cfg_maxWaiverClaims', mw);
+        lsSet('cfg_tradeThreshold', tt);
+      }
+      function fillConfig(c) {
+        document.getElementById('riskTolerance').value = c.riskTolerance;
+        document.getElementById('tradingEnabled').checked = !!c.tradingEnabled;
+        document.getElementById('waiverWireEnabled').checked = !!c.waiverWireEnabled;
+        document.getElementById('applyChanges').checked = !!c.applyChanges;
+        document.getElementById('maxWaiverClaims').value = c.maxWaiverClaims;
+        document.getElementById('tradeThreshold').value = c.tradeThreshold;
+      }
+      document.getElementById('cfgForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {
+          bot: {
+            riskTolerance: document.getElementById('riskTolerance').value,
+            tradingEnabled: document.getElementById('tradingEnabled').checked,
+            waiverWireEnabled: document.getElementById('waiverWireEnabled').checked,
+            applyChanges: document.getElementById('applyChanges').checked,
+            maxWaiverClaims: parseInt(document.getElementById('maxWaiverClaims').value, 10),
+            tradeThreshold: parseFloat(document.getElementById('tradeThreshold').value),
+          }
+        };
+        const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        alert(j.ok ? 'Config saved' : 'Save failed: ' + j.error);
+        saveConfigPrefs();
+        refresh();
+      });
+      document.getElementById('resetCfgBtn').addEventListener('click', async () => { await fetch('/api/config'); refresh(); });
+      document.getElementById('yahooForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {
+          clientId: document.getElementById('yClientId').value,
+          clientSecret: document.getElementById('yClientSecret').value,
+        };
+        const r = await fetch('/api/creds/yahoo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        alert(j.ok ? 'Yahoo creds saved' : 'Save failed: ' + j.error);
+        refresh();
+      });
+      document.getElementById('geminiForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = { apiKey: document.getElementById('gApiKey').value };
+        const r = await fetch('/api/creds/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        alert(j.ok ? 'Gemini key saved' : 'Save failed: ' + j.error);
+        refresh();
+      });
+      document.getElementById('runBotForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const teamKey = (document.getElementById('teamKeyInput') || {}).value || '';
+        lsSet('leagueKey', leagueKey); lsSet('teamKey', teamKey);
+        const body = { leagueKey, teamKey };
+        const r = await fetch('/api/bot/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        alert(j.ok ? 'Bot run complete' : 'Run failed: ' + j.error);
+        refresh();
+      });
+      document.getElementById('refreshBtn').addEventListener('click', refresh);
+      document.getElementById('refreshGeminiBtn')?.addEventListener('click', refreshGemini);
+      document.getElementById('clearGeminiBtn')?.addEventListener('click', async () => { await fetch('/api/gemini/clear', { method: 'POST' }); await refreshGemini(); });
+      document.getElementById('geminiTestBtn')?.addEventListener('click', async () => {
+        const el = document.getElementById('geminiTestInput');
+        const prompt = (el && (el['value'] !== undefined)) ? el['value'] : 'Say hello.';
+        const r = await fetch('/api/gemini/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+        const j = await r.json();
+        const out = document.getElementById('geminiTestResult');
+        if (out) out.textContent = j.ok ? j.response : 'Error: ' + j.error;
+        await refreshGemini();
+      });
+      document.getElementById('previewLineupBtn')?.addEventListener('click', async () => {
+        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const teamKey = (document.getElementById('teamKeyInput') || {}).value || '';
+        const area = document.getElementById('geminiPreview');
+        if (area) { area.style.display = 'block'; area.textContent = 'Loading preview…'; }
+        try {
+          const body = { type: 'lineup', leagueKey, teamKey };
+          const r = await fetch('/api/gemini/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const txt = await r.text();
+          let j = null;
+          try { j = JSON.parse(txt); } catch (_) {}
+          if (area) {
+            if (r.ok && j && j.ok) {
+              area.textContent = 'SYSTEM\n' + j.system + '\n\nUSER\n' + j.user;
+            } else if (r.status === 404) {
+              // Fallback: build prompt client-side using dashboard APIs
+              try {
+                const cfg = await fetchJson('/api/config');
+                const leagueResp = await fetchJson('/api/league?leagueKey=' + encodeURIComponent(leagueKey));
+                const rosterResp = await fetchJson('/api/roster?teamKey=' + encodeURIComponent(teamKey));
+                const bot = cfg.config || {};
+                const league = leagueResp.league || {};
+                const entries = rosterResp.roster || [];
+                const roster = entries.map(e => e.player).filter(Boolean);
+                const rosterLite = roster.map(p => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }));
+                const withSlots = entries.map(e => ({ slot: e.slot, player: { id: e.player?.id, name: e.player?.name, position: e.player?.position, team: e.player?.team, status: e.player?.status } }));
+                const system = 'You are a fantasy football lineup optimizer. Respond with JSON only.';
+                const parts = [];
+                parts.push('Task: Recommend an optimal starting lineup based on roster, league settings, and preferences.');
+                parts.push('Guidance: Use the latest news/data for each player to determine the fantasy lineup based on the provided league setup. Infer positional priorities from roster balance (depth vs required starters) and league rosterPositions. Do not rely on any points fields or any fixed/static priorities.');
+                parts.push('Rules: Respond with JSON only. No commentary. Follow schema exactly.');
+                parts.push('Schema: { "recommendedLineup": { "starters": { [position: string]: any }, "bench": any[] }, "changes": Array<{ "position": string, "playerOut"?: any, "playerIn": any, "reasoning": string, "pointsImpact": number }>, "confidence": number, "reasoning": string, "projectedPoints": number }');
+                parts.push('');
+                parts.push('Roster Count: ' + rosterLite.length);
+                parts.push('Roster JSON:'); parts.push(JSON.stringify(rosterLite, null, 2));
+                if (withSlots.length) { parts.push('RosterWithSlots JSON:'); parts.push(JSON.stringify(withSlots, null, 2)); }
+                parts.push('LeagueSettings JSON:'); parts.push(JSON.stringify(league.settings || {}, null, 2));
+                parts.push('Preferences JSON:'); parts.push(JSON.stringify(bot, null, 2));
+                const context = { week: league.currentWeek, season: league.season, leagueSettings: league.settings || {}, rosterWithSlots: entries };
+                parts.push('Context JSON:'); parts.push(JSON.stringify(context, null, 2));
+                const userText = parts.join('\n');
+                area.textContent = 'SYSTEM\n' + system + '\n\nUSER\n' + userText;
+              } catch (e2) {
+                area.textContent = 'Error: preview endpoint missing and fallback failed.';
+              }
+            } else if (j && j.error) {
+              area.textContent = 'Error: ' + j.error;
+            } else {
+              area.textContent = 'Error (' + r.status + '): ' + (txt || 'Unknown error');
+            }
+          }
+        } catch (e) {
+          if (area) { area.textContent = 'Error loading preview'; }
+        }
+      });
+      document.getElementById('previewWaiversBtn')?.addEventListener('click', async () => {
+        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const area = document.getElementById('geminiPreview');
+        if (area) { area.style.display = 'block'; area.textContent = 'Loading waivers preview…'; }
+        if (!leagueKey) { if (area) area.textContent = 'Error: leagueKey is required'; return; }
+        try {
+          const body = { type: 'waivers', leagueKey };
+          const r = await fetch('/api/gemini/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const j = await r.json();
+          if (r.ok && j && j.ok) {
+            area.textContent = 'SYSTEM\n' + j.system + '\n\nUSER\n' + j.user;
+          } else {
+            area.textContent = 'Error (' + r.status + '): ' + (j && j.error ? j.error : 'Unknown error');
+          }
+        } catch (e) {
+          if (area) { area.textContent = 'Error loading waivers preview'; }
+        }
+      });
+      document.getElementById('previewTradeBtn')?.addEventListener('click', async () => {
+        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const teamKey = (document.getElementById('teamKeyInput') || {}).value || '';
+        const theirTeamNumberStr = (document.getElementById('theirTeamNumberInput') || {}).value || '';
+        const theirTeamNumber = theirTeamNumberStr === '' ? undefined : parseInt(theirTeamNumberStr, 10);
+        const area = document.getElementById('geminiPreview');
+        if (area) { area.style.display = 'block'; area.textContent = 'Loading trade preview…'; }
+        if (!leagueKey || !teamKey) { if (area) area.textContent = 'Error: leagueKey and teamKey are required'; return; }
+        // Client-side validation: 1-10 and not equal to my team number
+        const m = String(teamKey).match(/\.t\.(\d+)$/);
+        const myNum = m ? parseInt(m[1], 10) : NaN;
+        if (theirTeamNumber !== undefined && Number.isFinite(theirTeamNumber)) {
+          if (theirTeamNumber < 1 || theirTeamNumber > 10) { if (area) area.textContent = 'Error: opponent team number must be between 1 and 10'; return; }
+          if (Number.isFinite(myNum) && theirTeamNumber === myNum) { if (area) area.textContent = 'Error: opponent team number cannot equal your team number'; return; }
+        }
+        try {
+          const body = { type: 'trade', leagueKey, teamKey, theirTeamNumber };
+          const r = await fetch('/api/gemini/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const j = await r.json();
+          if (r.ok && j && j.ok) {
+            let inf = '';
+            if (j.inferredOpponentTeamKey && (theirTeamNumber === undefined || theirTeamNumberStr === '')) inf = `\n\n(Inferred opponent: ${j.inferredOpponentTeamKey})`;
+            area.textContent = 'SYSTEM\n' + j.system + '\n\nUSER\n' + j.user + inf;
+          } else {
+            area.textContent = 'Error (' + r.status + '): ' + (j && j.error ? j.error : 'Unknown error');
+          }
+        } catch (e) {
+          if (area) { area.textContent = 'Error loading trade preview'; }
+        }
+      });
+      document.getElementById('refreshGeminiBtn')?.addEventListener('click', refreshGemini);
+      document.getElementById('clearGeminiBtn')?.addEventListener('click', async () => { await fetch('/api/gemini/clear', { method: 'POST' }); await refreshGemini(); });
+      document.getElementById('clearLogsBtn').addEventListener('click', async () => {
+        await fetch('/api/logs/clear', { method: 'POST' });
+        refresh();
+      });
+      document.getElementById('refreshTradesBtn').addEventListener('click', refreshTrades);
+      document.getElementById('dumpTradesBtn').addEventListener('click', async () => {
+        const env = await fetchJson('/api/env');
+        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || env.leagueKey || '';
+        const teamKey = (document.getElementById('teamKeyInput') || {}).value || env.teamKey || '';
+        const r = await fetch('/api/trades/dump?leagueKey=' + encodeURIComponent(leagueKey) + (teamKey ? ('&teamKey=' + encodeURIComponent(teamKey)) : '') + '&count=300');
+        const j = await r.json();
+        const pre = document.getElementById('tradesDumpView');
+        pre.style.display = 'block';
+        if (j.ok) pre.innerHTML = jsonHighlight({ tried: j.tried, count: j.count, items: j.items });
+        else pre.textContent = 'Error: ' + (j.error || 'Unknown');
+      });
+      document.getElementById('refreshTradeBlockBtn').addEventListener('click', () => refreshTradeBlock(true));
+      // Removed manual save; trade block is computed automatically
+      document.getElementById('saveFeaturesBtn').addEventListener('click', async () => {
+        const body = {
+          kickoffEnabled: document.getElementById('kickoffEnabled').checked,
+          irAutomationEnabled: document.getElementById('irAutomationEnabled').checked,
+          waiverAutomationEnabled: document.getElementById('waiverAutomationEnabled').checked,
+          tradesAutomationEnabled: document.getElementById('tradesAutomationEnabled').checked,
+        };
+        const r = await fetch('/api/features', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        alert(j.ok ? 'Automation settings saved' : 'Save failed: ' + j.error);
+        refresh();
+      });
+      // Initial populate only
+      refresh();
+      // Daily schedule form removed — scheduling handled by smart automation
+    </script>
+    <script src="/app.js"></script>
+  </body>
+  </html>
+  <img id="dogFollower" alt="8-bit dog"/>
+  <script>
+    (function setupDogFollower(){
+      const dog = document.getElementById('dogFollower');
+      if (!dog) return;
+      const css = document.createElement('style');
+      css.textContent = `
+        #dogFollower { position: fixed; left: 0; top: 0; width: 64px; height: 64px; image-rendering: pixelated; pointer-events: none; z-index: 2147483647; transform: translate(-9999px, -9999px); filter: drop-shadow(0 4px 6px rgba(167,139,250,0.35)); }
+      `;
+      document.head.appendChild(css);
+
+      const dataUrl = (s) => 'data:image/svg+xml;utf8,' + encodeURIComponent(s);
+      function buildFrame(phase) {
+        // phase: 0..3 walking cycle
+        // Leg offsets
+        const f = phase % 4;
+        const frontUp = (f === 0 || f === 3);
+        const backUp = (f === 1 || f === 2);
+        const fu = frontUp ? 0 : 1;
+        const bu = backUp ? 0 : 1;
+        return `
+        <svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+          <rect fill='none' x='0' y='0' width='16' height='16'/>
+          <!-- Yorkie ears (pointed, tan) -->
+          <rect fill='#e3b36b' x='5' y='2' width='1' height='1'/>
+          <rect fill='#e3b36b' x='4' y='3' width='2' height='1'/>
+          <rect fill='#e3b36b' x='10' y='2' width='1' height='1'/>
+          <rect fill='#e3b36b' x='10' y='3' width='2' height='1'/>
+          <!-- Inner ear (pink) -->
+          <rect fill='#f7b4c8' x='5' y='3' width='1' height='1'/>
+          <rect fill='#f7b4c8' x='10' y='3' width='1' height='1'/>
+          <!-- Pink bow (topknot) -->
+          <rect fill='#ff7ab8' x='7' y='3' width='2' height='1'/>
+          <!-- Head (rounded, dark steel) -->
+          <rect fill='#5a5566' x='5' y='4' width='6' height='1'/> <!-- narrower top -->
+          <rect fill='#5a5566' x='4' y='5' width='8' height='1'/>
+          <rect fill='#5a5566' x='4' y='6' width='8' height='1'/>
+          <rect fill='#5a5566' x='4' y='7' width='8' height='1'/>
+          <rect fill='#5a5566' x='4' y='8' width='8' height='1'/>
+          <!-- Hair highlights -->
+          <rect fill='#7a738a' x='6' y='5' width='1' height='1'/>
+          <rect fill='#7a738a' x='8' y='5' width='1' height='1'/>
+          <!-- Eyes -->
+          <rect fill='#000' x='6' y='6' width='1' height='1'/>
+          <rect fill='#000' x='9' y='6' width='1' height='1'/>
+          <!-- Muzzle + beard (tan) to show yorkie face shape -->
+          <rect fill='#e3b36b' x='6' y='7' width='4' height='1'/>
+          <rect fill='#e3b36b' x='5' y='8' width='6' height='1'/> <!-- cheeks/beard wider -->
+          <rect fill='#e3b36b' x='7' y='9' width='2' height='1'/> <!-- beard point -->
+          <!-- Nose -->
+          <rect fill='#000' x='8' y='8' width='1' height='1'/>
+          <!-- Blush -->
+          <rect fill='#f4a6c6' x='5' y='8' width='1' height='1'/>
+          <rect fill='#f4a6c6' x='10' y='8' width='1' height='1'/>
+          <!-- Suit torso -->
+          <rect fill='#f4f5fb' x='5' y='11' width='6' height='2'/>
+          <!-- Life support box -->
+          <rect fill='#a78bfa' x='6' y='11' width='1' height='1'/>
+          <rect fill='#ff9fcc' x='9' y='11' width='1' height='1'/>
+          <!-- Boots -->
+          <rect fill='#eaeaf2' x='5' y='13' width='2' height='1'/>
+          <rect fill='#eaeaf2' x='9' y='13' width='2' height='1'/>
+          <!-- Front leg stride -->
+          <rect fill='#f4f5fb' x='6' y='${12+fu}' width='1' height='1'/>
+          <!-- Back leg stride -->
+          <rect fill='#f4f5fb' x='9' y='${12+bu}' width='1' height='1'/>
+          <!-- Tail -->
+          <rect fill='#5a5566' x='12' y='11' width='1' height='1'/>
+        </svg>`;
+      }
+
+      const walkFrames = [0,1,2,3].map((p)=>dataUrl(buildFrame(p)));
+      function buildIdleFrame(phase){
+        const earUp = phase % 2 === 0; // toggle ear tip
+        const tailUp = phase % 2 === 1; // toggle tail
+        // Ears positions
+        const lEarTipY = earUp ? 1 : 2;
+        const rEarTipY = earUp ? 1 : 2;
+        const lInnerY = 3 + (earUp ? 0 : 0);
+        const rInnerY = 3 + (earUp ? 0 : 0);
+        const tailY = tailUp ? 10 : 11;
+        const tailX = tailUp ? 13 : 12; // slight wag
+        return `
+        <svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+          <rect fill='none' x='0' y='0' width='16' height='16'/>
+          <!-- Yorkie ears (wiggle) -->
+          <rect fill='#e3b36b' x='5' y='${lEarTipY}' width='1' height='1'/>
+          <rect fill='#e3b36b' x='4' y='3' width='2' height='1'/>
+          <rect fill='#e3b36b' x='10' y='${rEarTipY}' width='1' height='1'/>
+          <rect fill='#e3b36b' x='10' y='3' width='2' height='1'/>
+          <!-- Inner ear (pink) -->
+          <rect fill='#f7b4c8' x='5' y='${lInnerY}' width='1' height='1'/>
+          <rect fill='#f7b4c8' x='10' y='${rInnerY}' width='1' height='1'/>
+          <!-- Pink bow (topknot) -->
+          <rect fill='#ff7ab8' x='7' y='3' width='2' height='1'/>
+          <!-- Head (rounded, dark steel) -->
+          <rect fill='#5a5566' x='5' y='4' width='6' height='1'/>
+          <rect fill='#5a5566' x='4' y='5' width='8' height='1'/>
+          <rect fill='#5a5566' x='4' y='6' width='8' height='1'/>
+          <rect fill='#5a5566' x='4' y='7' width='8' height='1'/>
+          <rect fill='#5a5566' x='4' y='8' width='8' height='1'/>
+          <!-- Hair highlights -->
+          <rect fill='#7a738a' x='6' y='5' width='1' height='1'/>
+          <rect fill='#7a738a' x='8' y='5' width='1' height='1'/>
+          <!-- Eyes -->
+          <rect fill='#000' x='6' y='6' width='1' height='1'/>
+          <rect fill='#000' x='9' y='6' width='1' height='1'/>
+          <!-- Muzzle + beard (tan) -->
+          <rect fill='#e3b36b' x='6' y='7' width='4' height='1'/>
+          <rect fill='#e3b36b' x='5' y='8' width='6' height='1'/>
+          <rect fill='#e3b36b' x='7' y='9' width='2' height='1'/>
+          <!-- Nose -->
+          <rect fill='#000' x='8' y='8' width='1' height='1'/>
+          <!-- Suit torso -->
+          <rect fill='#f4f5fb' x='5' y='11' width='6' height='2'/>
+          <!-- Life support box -->
+          <rect fill='#a78bfa' x='6' y='11' width='1' height='1'/>
+          <rect fill='#ff9fcc' x='9' y='11' width='1' height='1'/>
+          <!-- Boots -->
+          <rect fill='#eaeaf2' x='5' y='13' width='2' height='1'/>
+          <rect fill='#eaeaf2' x='9' y='13' width='2' height='1'/>
+          <!-- Legs idle (centered) -->
+          <rect fill='#f4f5fb' x='6' y='12' width='1' height='1'/>
+          <rect fill='#f4f5fb' x='9' y='12' width='1' height='1'/>
+          <!-- Tail wiggle -->
+          <rect fill='#5a5566' x='${tailX}' y='${tailY}' width='1' height='1'/>
+        </svg>`;
+      }
+      const idleFrames = [0,1].map((p)=>dataUrl(buildIdleFrame(p)));
+      dog.src = walkFrames[0];
+
+      let targetX = window.innerWidth / 2;
+      let targetY = window.innerHeight / 2;
+      let x = targetX, y = targetY;
+      let dir = 1; // 1 right, -1 left
+      let lastX = targetX;
+      const ease = 0.18;
+
+      window.addEventListener('mousemove', (e) => {
+        targetX = e.clientX + 14; // offset from cursor
+        targetY = e.clientY + 14;
+        dir = e.clientX < lastX ? -1 : 1;
+        lastX = e.clientX;
+      }, { passive: true });
+
+      let last = performance.now();
+      let frameIdx = 0;
+      let acc = 0;
+      let lastMouseAt = performance.now();
+      let currentSet = 'walk';
+      let frameMs = 120; // ~8 fps walking
+      function tick() {
+        const now = performance.now();
+        const dt = now - last; last = now; acc += dt;
+        // Detect idle if mouse hasn't moved recently and sprite is close to target
+        const dist = Math.hypot(targetX - x, targetY - y);
+        const idle = (now - lastMouseAt > 800) && dist < 2.5;
+        const frames = currentSet === 'walk' ? walkFrames : idleFrames;
+        while (acc >= frameMs) {
+          acc -= frameMs; frameIdx = (frameIdx + 1) % frames.length; dog.src = frames[frameIdx];
+        }
+        x += (targetX - x) * ease;
+        y += (targetY - y) * ease;
+        dog.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) scaleX(${dir})`;
+        // Switch sets if needed
+        if (idle && currentSet !== 'idle') { currentSet = 'idle'; frameIdx = 0; acc = 0; frameMs = 500; dog.src = idleFrames[0]; }
+        if (!idle && currentSet !== 'walk') { currentSet = 'walk'; frameIdx = 0; acc = 0; frameMs = 120; dog.src = walkFrames[0]; }
+        requestAnimationFrame(tick);
+      }
+      tick();
+      // Track mouse activity for idle detection
+      window.addEventListener('mousemove', () => { lastMouseAt = performance.now(); }, { passive: true });
+    })();
+  </script>
