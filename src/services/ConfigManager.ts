@@ -32,19 +32,23 @@ export class ConfigManager {
 
   // --------- Public API ---------
   getBotConfig(): BotConfig {
-    const envCfg: Partial<BotConfig> = {
-      riskTolerance: this.parseRisk(process.env.BOT_RISK_TOLERANCE),
-      tradingEnabled: this.parseBool(process.env.BOT_TRADING_ENABLED, true),
-      waiverWireEnabled: this.parseBool(process.env.BOT_WAIVER_WIRE_ENABLED, true),
-      maxWaiverClaims: this.parseInt(process.env.BOT_MAX_WAIVER_CLAIMS, 3),
-      tradeThreshold: this.parseFloat(process.env.BOT_TRADE_THRESHOLD, 0.0),
-      applyChanges: this.parseBool(process.env.APPLY_CHANGES, false),
-      positionPriorities: this.parsePositionPriorities(process.env.BOT_POSITION_PRIORITIES),
-    };
-    const overrides = this.loadPreferences();
-    const merged = { ...envCfg, ...overrides } as Partial<BotConfig>;
-    const withDefaults = this.applyDefaults(merged);
+    // Source exclusively from app-settings; migrate legacy bot-config.json if present.
+    let app = this.loadAppSettings();
+    let bot = (app as any).bot as Partial<BotConfig> | undefined;
+    if (!bot || Object.keys(bot).length === 0) {
+      const legacy = this.loadPreferences();
+      if (legacy && Object.keys(legacy).length > 0) {
+        bot = legacy as Partial<BotConfig>;
+        // Persist migration into app-settings
+        app = this.saveAppSettings({ ...app, bot: this.applyDefaults(bot) });
+      }
+    }
+    const withDefaults = this.applyDefaults(bot || {});
     this.validateBotConfig(withDefaults);
+    // Ensure app-settings always carries bot config
+    if (!(app as any).bot) {
+      this.saveAppSettings({ ...app, bot: withDefaults });
+    }
     return withDefaults;
   }
 
@@ -107,19 +111,25 @@ export class ConfigManager {
     return tok;
   }
 
+  deleteYahooAuthToken(): void {
+    this.ensureStore();
+    try { (this.store as any).remove('yahoo-token'); } catch {}
+  }
+
   // --------- Helpers ---------
   savePreferences(partial: Partial<BotConfig>): BotConfig {
-    const current = this.loadPreferences();
+    // Persist bot config into app-settings exclusively
+    const app = this.loadAppSettings();
+    const current = ((app as any).bot || {}) as Partial<BotConfig>;
     const next = { ...current, ...partial } as Partial<BotConfig>;
     const validated = this.applyDefaults(next);
     this.validateBotConfig(validated);
-    const dir = path.dirname(this.preferencesPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.preferencesPath, JSON.stringify(next, null, 2), 'utf8');
+    this.saveAppSettings({ ...app, bot: validated });
     return validated;
   }
 
   loadPreferences(): Partial<BotConfig> {
+    // Legacy loader for bot-config.json; used only for one-time migration
     try {
       if (!fs.existsSync(this.preferencesPath)) return {};
       const raw = fs.readFileSync(this.preferencesPath, 'utf8');
@@ -139,20 +149,17 @@ export class ConfigManager {
         return this.applyAppDefaults(obj);
       }
     } catch {}
-    // Seed from environment on first load
+    // Seed with neutral defaults (no environment dependency)
     const seeded: AppSettings = this.applyAppDefaults({
-      leagueKey: process.env.LEAGUE_KEY || '',
-      teamKey: process.env.TEAM_KEY || '',
+      leagueKey: '',
+      teamKey: '',
       scheduleEnabled: false,
-      scheduleHour: parseInt(process.env.BOT_RUN_HOUR || '9', 10) || 9,
-      scheduleMinute: parseInt(process.env.BOT_RUN_MINUTE || '0', 10) || 0,
-      kickoffEnabled: String(process.env.KICKOFF_CHECKS_ENABLED || '0') === '1',
-      irAutomationEnabled: String(process.env.IR_AUTOMATION_ENABLED || '1') !== '0',
-      waiverAutomationEnabled: String(process.env.WAIVER_AUTOMATION_ENABLED || '1') === '1',
-      tradesAutomationEnabled: String(process.env.TRADES_AUTOMATION_ENABLED || '1') === '1',
-      waiverDay: process.env.WAIVER_DAY ? parseInt(String(process.env.WAIVER_DAY), 10) : undefined,
-      waiverHour: process.env.WAIVER_HOUR ? parseInt(String(process.env.WAIVER_HOUR), 10) : undefined,
-      waiverMinute: process.env.WAIVER_MINUTE ? parseInt(String(process.env.WAIVER_MINUTE), 10) : undefined,
+      scheduleHour: 9,
+      scheduleMinute: 0,
+      kickoffEnabled: false,
+      irAutomationEnabled: true,
+      waiverAutomationEnabled: true,
+      tradesAutomationEnabled: true,
     } as any);
     try { this.saveAppSettings(seeded); } catch {}
     return seeded;
@@ -168,7 +175,7 @@ export class ConfigManager {
 
   private applyAppDefaults(p: Partial<AppSettings>): AppSettings {
     const coerce = (n: any, def: number) => Number.isFinite(Number(n)) ? Number(n) : def;
-    return {
+    const base: AppSettings = {
       leagueKey: String(p.leagueKey || ''),
       teamKey: String(p.teamKey || ''),
       scheduleEnabled: !!p.scheduleEnabled,
@@ -182,6 +189,9 @@ export class ConfigManager {
       waiverHour: p.waiverHour !== undefined ? coerce(p.waiverHour, 7) : undefined,
       waiverMinute: p.waiverMinute !== undefined ? coerce(p.waiverMinute, 0) : undefined,
     };
+    // Preserve existing bot config if present; otherwise leave undefined to allow defaults
+    if ((p as any).bot) (base as any).bot = (p as any).bot as any;
+    return base;
   }
 
   // --------- League profile (per-league scoring & settings) ---------

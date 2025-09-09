@@ -1,14 +1,16 @@
 import dotenv from 'dotenv';
 import { BotController } from '../controllers';
 import { Scheduler } from '../services/Scheduler';
+import { ConfigManager } from '../services/ConfigManager';
 
 dotenv.config();
 
 async function runOnce() {
-  const leagueKey = process.env.LEAGUE_KEY;
-  const teamKey = process.env.TEAM_KEY;
+  const s = new ConfigManager().loadAppSettings();
+  const leagueKey = s.leagueKey;
+  const teamKey = s.teamKey;
   if (!leagueKey || !teamKey) {
-    console.error('Missing LEAGUE_KEY or TEAM_KEY in environment');
+    console.error('Missing leagueKey or teamKey in app-settings.json');
     process.exit(1);
   }
   const bot = new BotController({ leagueKey, teamKey });
@@ -16,9 +18,10 @@ async function runOnce() {
 }
 
 function runScheduled() {
-  const hour = parseInt(process.env.BOT_RUN_HOUR || '9', 10);
-  const minute = parseInt(process.env.BOT_RUN_MINUTE || '0', 10);
-  const runOnStart = /^true$/i.test(process.env.BOT_RUN_ON_START || 'true');
+  const s = new ConfigManager().loadAppSettings();
+  const hour = s.scheduleHour;
+  const minute = s.scheduleMinute;
+  const runOnStart = false;
   const task = async () => {
     await runOnce();
   };
@@ -39,4 +42,3 @@ if (mode === 'once') {
   console.error(`Unknown mode: ${mode}. Use 'once' or 'schedule'.`);
   process.exit(1);
 }
-

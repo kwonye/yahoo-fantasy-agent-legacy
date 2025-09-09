@@ -21,7 +21,7 @@ export class YahooOAuthClient {
     this.http = axios.create();
   }
 
-  getAuthorizationUrl(redirectUri: string, state: string, scope = 'fspt-w'): string {
+  getAuthorizationUrl(redirectUri: string, state: string, scope = (process.env.YAHOO_SCOPE || 'fspt-w')): string {
     const creds = this.getCreds();
     const params = new URLSearchParams({
       client_id: creds.clientId,
@@ -44,11 +44,29 @@ export class YahooOAuthClient {
       grant_type: 'authorization_code',
     });
     const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
-    const { data } = await this.http.post(this.tokenUrl, params.toString(), { headers });
+    let data: any;
+    try {
+      const resp = await this.http.post(this.tokenUrl, params.toString(), { headers });
+      data = resp.data;
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const body = e?.response?.data;
+      const msg = status ? `status ${status}` : (e?.message || 'request failed');
+      if (process.env.DEBUG_OAUTH === '1') {
+        try { console.warn('[OAuth] Token exchange error:', msg, '\nBody:', typeof body === 'object' ? JSON.stringify(body) : String(body)); } catch {}
+      }
+      throw new Error(msg + (body ? `; body=${typeof body === 'object' ? JSON.stringify(body) : String(body)}` : ''));
+    }
     const token = this.mapTokenResponse(data);
     this.config.saveYahooAuthToken(token);
-    // Optionally also persist tokens in creds for compatibility
-    this.config.saveYahooCredentials({ ...creds, accessToken: token.accessToken, refreshToken: token.refreshToken });
+    // Persist tokens alongside client credentials, but keep user-saved clientId/secret if present in store
+    try {
+      const existing = this.config.loadYahooCredentials();
+      const base = (existing && existing.clientId && existing.clientSecret) ? existing : creds;
+      this.config.saveYahooCredentials({ ...base, accessToken: token.accessToken, refreshToken: token.refreshToken });
+    } catch {
+      // ignore if secure store not configured
+    }
     return token;
   }
 
@@ -76,11 +94,27 @@ export class YahooOAuthClient {
       refresh_token: refreshToken,
     });
     const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
-    const { data } = await this.http.post(this.tokenUrl, params.toString(), { headers });
+    let data: any;
+    try {
+      const resp = await this.http.post(this.tokenUrl, params.toString(), { headers });
+      data = resp.data;
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const body = e?.response?.data;
+      const msg = status ? `status ${status}` : (e?.message || 'request failed');
+      if (process.env.DEBUG_OAUTH === '1') {
+        try { console.warn('[OAuth] Refresh error:', msg, '\nBody:', typeof body === 'object' ? JSON.stringify(body) : String(body)); } catch {}
+      }
+      throw new Error(msg + (body ? `; body=${typeof body === 'object' ? JSON.stringify(body) : String(body)}` : ''));
+    }
     const token = this.mapTokenResponse(data, refreshToken);
     this.config.saveYahooAuthToken(token);
-    // keep creds in sync for other consumers
-    this.config.saveYahooCredentials({ ...creds, accessToken: token.accessToken, refreshToken: token.refreshToken });
+    // Keep creds in sync but preserve any store clientId/secret if available
+    try {
+      const existing = this.config.loadYahooCredentials();
+      const base = (existing && existing.clientId && existing.clientSecret) ? existing : creds;
+      this.config.saveYahooCredentials({ ...base, accessToken: token.accessToken, refreshToken: token.refreshToken });
+    } catch {}
     return token;
   }
 
@@ -95,38 +129,14 @@ export class YahooOAuthClient {
   }
 
   private getCreds(): YahooCredentials {
-    // Prefer environment overrides so updating .env takes immediate effect
-    const envId = process.env.YAHOO_CLIENT_ID;
-    const envSecret = process.env.YAHOO_CLIENT_SECRET;
-    const envAccess = process.env.YAHOO_ACCESS_TOKEN;
-    const envRefresh = process.env.YAHOO_REFRESH_TOKEN;
+    // Only use credentials from secure store (set via dashboard)
+    const loadStore = (): YahooCredentials | null => {
+      try { return this.config.loadYahooCredentials(); } catch { return null; }
+    };
+    const fromStore = loadStore();
 
-    if (envId && envSecret) {
-      const envCreds: YahooCredentials = {
-        clientId: envId,
-        clientSecret: envSecret,
-        accessToken: envAccess,
-        refreshToken: envRefresh,
-      };
-      // Try to persist for consistency if secure store is available
-      try {
-        this.config.saveYahooCredentials(envCreds);
-      } catch {
-        // ignore if secure store not configured
-      }
-      return envCreds;
-    }
+    if (fromStore?.clientId && fromStore?.clientSecret) return fromStore;
 
-    let fromStore: YahooCredentials | null = null;
-    try {
-      fromStore = this.config.loadYahooCredentials();
-    } catch {
-      // ignore when secure store is not configured
-    }
-    const creds = fromStore ?? { clientId: '', clientSecret: '' } as YahooCredentials;
-    if (!creds.clientId || !creds.clientSecret) {
-      throw new Error('Yahoo client credentials are not configured');
-    }
-    return creds;
+    throw new Error('Yahoo client credentials are not configured');
   }
 }

@@ -106,6 +106,17 @@ export class BotController {
     await this.processWaivers();
   }
 
+  // Expose IR hygiene as a direct action
+  async runIR(): Promise<void> {
+    await this.runRosterHygiene();
+  }
+
+  // Expose trades automation (evaluate + respond) as a direct action
+  async runTrades(): Promise<void> {
+    await this.evaluateTrades();
+    await this.processIncomingTradeOffers();
+  }
+
   private async runRosterHygiene() {
     try {
       const app = new ConfigManager().loadAppSettings();

@@ -249,7 +249,10 @@
               <form id="yahooForm" class="mono mb-3">
                 <div class="mb-2"><label class="form-label">Yahoo Client ID</label><input id="yClientId" class="form-control form-control-sm" /></div>
                 <div class="mb-2"><label class="form-label">Yahoo Client Secret</label><input id="yClientSecret" class="form-control form-control-sm" /></div>
-                <button type="submit" class="btn btn-sm btn-secondary">Save Yahoo Creds</button>
+                <div class="d-flex gap-2">
+                  <button type="submit" class="btn btn-sm btn-secondary">Save Yahoo Creds</button>
+                  <a id="yahooConnectBtn" href="/auth/yahoo/start" class="btn btn-sm btn-outline-primary">Connect Yahoo</a>
+                </div>
               </form>
               <form id="geminiForm" class="mono">
                 <div class="mb-2"><label class="form-label">Gemini API Key</label><input id="gApiKey" class="form-control form-control-sm" /></div>
@@ -261,7 +264,10 @@
                   <div class="col-6"><label class="form-label">League Key</label><input id="leagueKeyInput" class="form-control form-control-sm" placeholder="nfl.l.XXXXX" /></div>
                   <div class="col-6"><label class="form-label">Team Key</label><input id="teamKeyInput" class="form-control form-control-sm" placeholder="nfl.l.XXXXX.t.Y" /></div>
                 </div>
-                <button type="submit" class="btn btn-sm btn-outline-primary" id="runBotBtn">Run Bot Now</button>
+                <div class="d-flex gap-2">
+                  <button type="button" class="btn btn-sm btn-secondary" id="saveKeysBtn">Save Keys</button>
+                  <button type="submit" class="btn btn-sm btn-outline-primary" id="runBotBtn">Run Bot Now</button>
+                </div>
               </form>
               <!-- Daily schedule UI removed: scheduling is now managed by smart automation (waiver time + kickoff checks) -->
             </div>
@@ -295,21 +301,33 @@
           <div class="card">
             <div class="card-header">Automation</div>
             <div class="card-body mono">
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="kickoffEnabled" />
-                  <label class="form-check-label" for="kickoffEnabled">Enable Kickoff Checks (90/60/30 pre-windows)</label>
+                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                  <div>
+                    <input class="form-check-input" type="checkbox" id="kickoffEnabled" />
+                    <label class="form-check-label ms-2" for="kickoffEnabled">Enable Kickoff Checks (90/60/30 pre-windows)</label>
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="runKickoffNowBtn" type="button">Run Kickoff Check</button>
                 </div>
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="irAutomationEnabled" />
-                  <label class="form-check-label" for="irAutomationEnabled">Enable IR Automation (move OUT/INJ to IR; auto-activate)</label>
+                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                  <div>
+                    <input class="form-check-input" type="checkbox" id="irAutomationEnabled" />
+                    <label class="form-check-label ms-2" for="irAutomationEnabled">Enable IR Automation (move OUT/INJ to IR; auto-activate)</label>
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="runIrNowBtn" type="button">Run IR Now</button>
                 </div>
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="waiverAutomationEnabled" />
-                  <label class="form-check-label" for="waiverAutomationEnabled">Enable Auto Waivers (weekly; uses WAIVER_DAY/HOUR/MINUTE)</label>
+                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                  <div>
+                    <input class="form-check-input" type="checkbox" id="waiverAutomationEnabled" />
+                    <label class="form-check-label ms-2" for="waiverAutomationEnabled">Enable Auto Waivers (weekly; uses WAIVER_DAY/HOUR/MINUTE)</label>
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="runWaiversNowBtn" type="button">Run Waivers</button>
                 </div>
-              <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
-                <label class="form-check-label" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
+              <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                <div>
+                  <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
+                  <label class="form-check-label ms-2" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" id="runTradesNowBtn" type="button">Run Trades</button>
               </div>
               <button class="btn btn-sm btn-outline-success" id="saveFeaturesBtn">Save</button>
               <div class="small text-muted mt-2" id="quotaSummary"></div>
@@ -445,13 +463,22 @@
         // Server defaults
         if (leagueEl) leagueEl.value = env.leagueKey || '';
         if (teamEl) teamEl.value = env.teamKey || '';
-        // Features
+        // Features: read only from /api/features (do not fall back to env)
         try {
-          document.getElementById('kickoffEnabled').checked = !!(env.features && env.features.kickoffEnabled);
-          document.getElementById('irAutomationEnabled').checked = !!(env.features && env.features.irAutomationEnabled);
-          document.getElementById('waiverAutomationEnabled').checked = !!(env.features && env.features.waiverAutomationEnabled);
-          document.getElementById('tradesAutomationEnabled').checked = !!(env.features && env.features.tradesAutomationEnabled);
-        } catch {}
+          const feat = await fetchJson('/api/features');
+          const f = (feat && feat.ok && feat.features) ? feat.features : {};
+          const setChk = (id, val) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.checked = !!val;
+            if (val) el.setAttribute('checked','checked'); else el.removeAttribute('checked');
+            el.setAttribute('aria-checked', !!val ? 'true' : 'false');
+          };
+          setChk('kickoffEnabled', f.kickoffEnabled);
+          setChk('irAutomationEnabled', f.irAutomationEnabled);
+          setChk('waiverAutomationEnabled', f.waiverAutomationEnabled);
+          setChk('tradesAutomationEnabled', f.tradesAutomationEnabled);
+        } catch (e) { console.warn('features load failed', e); }
         // Overlay local preferences if present
         const lk = lsGet('leagueKey',''); if (lk && leagueEl) leagueEl.value = lk;
         const tk = lsGet('teamKey',''); if (tk && teamEl) teamEl.value = tk;
@@ -778,6 +805,19 @@
         alert(j.ok ? 'Gemini key saved' : 'Save failed: ' + j.error);
         refresh();
       });
+      const saveKeysBtn = document.getElementById('saveKeysBtn');
+      if (saveKeysBtn) {
+        saveKeysBtn.addEventListener('click', async () => {
+          const leagueKey = (document.getElementById('leagueKeyInput')||{}).value || '';
+          const teamKey = (document.getElementById('teamKeyInput')||{}).value || '';
+          if (!leagueKey || !teamKey) { alert('Please enter both League Key and Team Key.'); return; }
+          const r = await fetch('/api/env', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueKey, teamKey }) });
+          const j = await r.json();
+          alert(j && j.ok ? 'Keys saved' : ('Save failed: ' + (j && j.error || 'unknown')));
+          lsSet('leagueKey', leagueKey); lsSet('teamKey', teamKey);
+          refresh();
+        });
+      }
       document.getElementById('runBotForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
@@ -910,6 +950,27 @@
         await fetch('/api/logs/clear', { method: 'POST' });
         refresh();
       });
+      async function postRun(path){
+        try {
+          const env = await fetchJson('/api/env');
+          const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || env.leagueKey || '';
+          const teamKey = (document.getElementById('teamKeyInput') || {}).value || env.teamKey || '';
+          if (!leagueKey || !teamKey) { alert('Set leagueKey and teamKey first.'); return; }
+          const btn = this instanceof HTMLElement ? this : null;
+          if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+          const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueKey, teamKey }) });
+          const j = await r.json();
+          if (btn) { btn.disabled = false; btn.textContent = btn.getAttribute('data-label') || 'Run'; }
+          alert(j && j.ok ? 'Done' : ('Failed: ' + (j && j.error || 'Unknown')));
+          refresh();
+        } catch (e) {
+          alert('Error: ' + (e && e.message ? e.message : 'Unknown'));
+        }
+      }
+      const kickoffBtn = document.getElementById('runKickoffNowBtn'); if (kickoffBtn) { kickoffBtn.setAttribute('data-label','Run Kickoff Check'); kickoffBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/kickoff'); }); }
+      const irBtn = document.getElementById('runIrNowBtn'); if (irBtn) { irBtn.setAttribute('data-label','Run IR Now'); irBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/ir'); }); }
+      const waiversBtn = document.getElementById('runWaiversNowBtn'); if (waiversBtn) { waiversBtn.setAttribute('data-label','Run Waivers'); waiversBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/waivers'); }); }
+      const tradesBtn = document.getElementById('runTradesNowBtn'); if (tradesBtn) { tradesBtn.setAttribute('data-label','Run Trades'); tradesBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/trades'); }); }
       document.getElementById('refreshTradesBtn').addEventListener('click', refreshTrades);
       document.getElementById('dumpTradesBtn').addEventListener('click', async () => {
         const env = await fetchJson('/api/env');
@@ -940,7 +1001,7 @@
       refresh();
       // Daily schedule form removed — scheduling handled by smart automation
     </script>
-    <script src="/app.js"></script>
+    <!-- Removed legacy client bundle include to avoid state conflicts with inline dashboard script -->
   </body>
   </html>
   <img id="dogFollower" alt="8-bit dog"/>

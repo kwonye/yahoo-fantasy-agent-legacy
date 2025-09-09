@@ -17,23 +17,17 @@ async function ensureAuth(oauth: YahooOAuthClient, mgr: ConfigManager) {
     const token = await oauth.getValidAccessToken();
     return token;
   } catch (e) {
-    const redirectUri = process.env.REDIRECT_URI;
-    const authCode = process.env.AUTH_CODE;
-    if (authCode && redirectUri) {
-      console.log('Exchanging AUTH_CODE for tokens...');
-      await oauth.exchangeCodeForToken(authCode, redirectUri);
-      const token = await oauth.getValidAccessToken();
-      return token;
-    }
-    if (!redirectUri) {
-      console.log('Set REDIRECT_URI to your app callback to complete OAuth.');
-      process.exit(0);
-    }
+    const redirectUri = process.env.REDIRECT_URI || 'http://localhost:3000/oauth/callback';
     const state = crypto.randomBytes(8).toString('hex');
     const url = oauth.getAuthorizationUrl(redirectUri, state);
-    console.log('Authorize the app in your browser:');
+    console.log('Yahoo auth required. Two options:');
+    console.log('1) Start the web dashboard (npm run web), then click "Connect Yahoo".');
+    console.log('   Redirect URI should be registered as:', redirectUri);
+    console.log('   Dashboard URL: http://localhost:3000/auth/yahoo/start');
+    console.log('');
+    console.log('2) Manual flow (advanced): open this URL and complete consent,');
+    console.log('   then copy the code from the redirect URL and exchange via a one-off script:');
     console.log(url);
-    console.log('Then set AUTH_CODE with the returned code and rerun this demo.');
     process.exit(0);
   }
 }
@@ -64,8 +58,9 @@ async function main() {
     console.log('Using Yahoo client id (masked):', mask(cid));
   }
 
-  const leagueKey = process.env.LEAGUE_KEY;
-  const teamKey = process.env.TEAM_KEY;
+  const s = mgr.loadAppSettings();
+  const leagueKey = s.leagueKey;
+  const teamKey = s.teamKey;
 
   if (leagueKey) {
     try {
@@ -77,7 +72,7 @@ async function main() {
       console.error('Failed league calls:', (e as Error).message);
     }
   } else {
-    console.log('Set LEAGUE_KEY to fetch league and waivers.');
+    console.log('Set leagueKey in config/app-settings.json to fetch league and waivers.');
   }
 
   if (teamKey) {
@@ -88,7 +83,7 @@ async function main() {
       console.error('Failed team roster call:', (e as Error).message);
     }
   } else {
-    console.log('Set TEAM_KEY to fetch roster.');
+    console.log('Set teamKey in config/app-settings.json to fetch roster.');
   }
 }
 

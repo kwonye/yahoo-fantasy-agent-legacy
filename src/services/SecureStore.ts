@@ -76,5 +76,9 @@ export class SecureStore {
     const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     return JSON.parse(plaintext.toString('utf8')) as T;
   }
-}
 
+  remove(name: string): void {
+    const fp = this.filePath(name);
+    try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch {}
+  }
+}

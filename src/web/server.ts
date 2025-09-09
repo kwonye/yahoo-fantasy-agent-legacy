@@ -1,8 +1,10 @@
 import express from 'express';
 import http from 'http';
+import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { DecisionType } from '../models/Common';
 import { BotController } from '../controllers/BotController';
 import { Scheduler } from '../services/Scheduler';
@@ -16,7 +18,8 @@ import { ConfigManager } from '../services/ConfigManager';
 dotenv.config();
 
 const app = express();
-const defaultPort = parseInt(process.env.PORT || '3000', 10);
+app.set('trust proxy', true);
+const defaultPort = parseInt(process.env.PORT || process.env.HTTPS_PORT || '3000', 10);
 let scheduler: Scheduler | null = null;
 // runtime state is sourced from AppSettings
 const cmInit = new ConfigManager();
@@ -44,6 +47,184 @@ app.use(express.static(path.join(process.cwd(), 'public')));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// ---------------- Yahoo OAuth ----------------
+function computeRedirectUri(req: express.Request, overridePath?: '/auth/callback' | '/oauth/callback'): string {
+  // Prefer explicit env to match Yahoo app registration exactly
+  const env = (process.env.REDIRECT_URI || '').trim();
+  if (env) {
+    if (overridePath) {
+      try {
+        const u = new URL(env);
+        u.pathname = overridePath;
+        u.search = '';
+        return u.toString();
+      } catch {}
+    }
+    return env;
+  }
+  // Otherwise, derive from request and use /auth/callback as default path
+  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+  const host = req.headers.host || `localhost:${defaultPort}`;
+  const path = overridePath ?? '/auth/callback';
+  return `${proto}://${host}${path}`;
+}
+
+// Redirect user to Yahoo authorization URL
+app.get('/auth/yahoo/start', (req, res) => {
+  try {
+    const cm = new ConfigManager();
+    const oauth = new YahooOAuthClient(cm);
+    const cbParam = String((req.query.cb || '').toString());
+    const forcedPath = cbParam === 'oauth' ? '/oauth/callback' : cbParam === 'auth' ? '/auth/callback' : undefined;
+    const redirectUri = computeRedirectUri(req, forcedPath as any);
+    const state = crypto.randomBytes(8).toString('hex');
+    const scope = String((req.query.scope as string) || process.env.YAHOO_SCOPE || 'fspt-w');
+    const url = oauth.getAuthorizationUrl(redirectUri, state, scope);
+    try {
+      const creds = (cm.loadYahooCredentials() || {}) as any;
+      const clientId = String(creds.clientId || '').trim();
+      if (!clientId) {
+        res.status(400).send('Yahoo client credentials are not configured. Save them in the dashboard first.');
+        return;
+      }
+      console.log('[OAuth-start] clientId=%s redirect_uri=%s scope=%s', clientId.slice(0,3) + '***', redirectUri, scope);
+      if (String(process.env.DEBUG_OAUTH || '0') === '1') {
+        console.log('[OAuth-start-url]', url);
+      }
+    } catch {}
+    // Optionally set state cookie for CSRF (not validated yet)
+    try { res.cookie?.('oauth_state', state, { httpOnly: true, sameSite: 'lax' } as any); } catch {}
+    res.redirect(url);
+  } catch (e) {
+    res.status(500).send('OAuth start failed: ' + (e as Error).message);
+  }
+});
+
+// OAuth callback: capture ?code=... and exchange for tokens automatically
+async function handleYahooCallback(req: express.Request, res: express.Response) {
+  const code = String(req.query.code || '').trim();
+  const error = String(req.query.error || '').trim();
+  if (error) {
+    res.status(400).send(`OAuth error: ${error}`);
+    return;
+  }
+  if (!code) {
+    res.status(400).send('Missing authorization code.');
+    return;
+  }
+  try {
+    const cm = new ConfigManager();
+    const oauth = new YahooOAuthClient(cm);
+    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const host = req.headers.host || `localhost:${defaultPort}`;
+    const redirectFromReq = `${proto}://${host}${req.path}`;
+    const envRedirect = (process.env.REDIRECT_URI || '').trim();
+    const debug = String(process.env.DEBUG_OAUTH || '0') === '1';
+    const attempt = async (uri: string) => {
+      if (debug) console.log('[OAuth] Exchanging code with redirect_uri=', uri);
+      return oauth.exchangeCodeForToken(code, uri);
+    };
+    try {
+      await attempt(redirectFromReq);
+    } catch (e1: any) {
+      const msg1 = e1 && e1.message ? e1.message : String(e1);
+      if (debug) console.warn('[OAuth] First exchange failed:', msg1);
+      // Fallback to env redirect if different
+      if (envRedirect && envRedirect !== redirectFromReq) {
+        try {
+          await attempt(envRedirect);
+        } catch (e2: any) {
+          const msg2 = e2 && e2.message ? e2.message : String(e2);
+          throw new Error(`OAuth exchange failed (tried ${redirectFromReq} then env ${envRedirect}): ${msg2}`);
+        }
+      } else {
+        throw new Error(`OAuth exchange failed (redirect_uri=${redirectFromReq}): ${msg1}`);
+      }
+    }
+    // Redirect back to dashboard with a success flag
+    const base = `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'http'}://${req.headers.host}`;
+    res.redirect(base + '/?yahoo=connected');
+  } catch (e) {
+    res.status(500).send('OAuth exchange failed: ' + (e as Error).message);
+  }
+}
+
+// Support both legacy and new callback paths
+app.get('/oauth/callback', handleYahooCallback);
+app.get('/auth/callback', handleYahooCallback);
+
+// Manual OAuth code exchange: accept a pasted callback URL or explicit code + redirectUri
+function extractCodeAndRedirect(fromUrl: string): { code?: string; redirectUri?: string; state?: string } {
+  try {
+    const u = new URL(fromUrl);
+    const code = u.searchParams.get('code') || undefined;
+    const state = u.searchParams.get('state') || undefined;
+    // redirectUri must match authorization request redirect without query
+    const redirectUri = `${u.protocol}//${u.host}${u.pathname}`;
+    if (code) return { code, redirectUri, state };
+  } catch {
+    // Fallback: naive parse for code= when URL constructor fails
+    const idx = fromUrl.indexOf('code=');
+    if (idx >= 0) {
+      const rest = fromUrl.slice(idx + 5);
+      const code = rest.split(/[&#?]/)[0];
+      // Try to salvage origin/path up to first '?'
+      const q = fromUrl.indexOf('?');
+      if (q > 0) {
+        try {
+          const base = new URL(fromUrl.slice(0, q));
+          const redirectUri = `${base.protocol}//${base.host}${base.pathname}`;
+          return { code, redirectUri };
+        } catch {}
+      }
+      return { code };
+    }
+  }
+  return {};
+}
+
+app.post('/api/oauth/exchange', async (req, res) => {
+  const rawUrl = String((req.body?.url || '').toString()).trim();
+  let code = String((req.body?.code || '').toString()).trim();
+  let redirectUri = String((req.body?.redirectUri || '').toString()).trim();
+  try {
+    if (rawUrl) {
+      const parsed = extractCodeAndRedirect(rawUrl);
+      if (parsed.code) code = parsed.code;
+      if (parsed.redirectUri) redirectUri = parsed.redirectUri;
+    }
+    if (!code) { res.status(400).json({ ok: false, error: 'Missing authorization code' }); return; }
+    if (!redirectUri) {
+      // Fallback to environment REDIRECT_URI or compute from request host
+      const env = (process.env.REDIRECT_URI || '').trim();
+      if (env) redirectUri = env;
+      else redirectUri = computeRedirectUri(req);
+    }
+    const cm = new ConfigManager();
+    const oauth = new YahooOAuthClient(cm);
+    if (String(process.env.DEBUG_OAUTH || '0') === '1') {
+      console.log('[OAuth] Manual exchange attempt', { redirectUri, codeLen: code.length });
+    }
+    const tok = await oauth.exchangeCodeForToken(code, redirectUri);
+    res.json({ ok: true, token: { hasAccess: !!tok.accessToken, hasRefresh: !!tok.refreshToken, expiresAt: tok.expiresAt } });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Debug: show effective OAuth config
+app.get('/api/oauth/info', (req, res) => {
+  try {
+    const cm = new ConfigManager();
+    const redirectUri = computeRedirectUri(req);
+    let clientId = '';
+    try { clientId = String((cm.loadYahooCredentials() as any)?.clientId || ''); } catch {}
+    res.json({ ok: true, redirectUri, clientIdMasked: clientId ? (clientId.slice(0,3) + '***' + clientId.slice(-2)) : '' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
 });
 
 // Event stream for client auto-refresh
@@ -179,16 +360,15 @@ app.get('/api/creds', (_req, res) => {
     const cm = new ConfigManager();
     let yahoo: any = null;
     let gemini: any = null;
+    let source: 'store' | null = null;
     try { yahoo = cm.loadYahooCredentials(); } catch {}
     try { gemini = cm.loadGeminiCredentials(); } catch {}
-    if (!yahoo) {
-      try { const envY = cm.getYahooEnvCredentials(); yahoo = envY; } catch {}
-    }
+    if (yahoo) source = 'store';
     if (!gemini) {
       try { const envG = cm.getEnvCredentials().gemini; gemini = envG; } catch {}
     }
     res.json({ ok: true, creds: {
-      yahoo: yahoo ? { clientId: mask(yahoo.clientId), hasRefresh: !!yahoo.refreshToken } : null,
+      yahoo: yahoo ? { clientId: mask(yahoo.clientId), hasRefresh: !!yahoo.refreshToken, source } : null,
       gemini: gemini ? { apiKey: mask(gemini.apiKey) } : null,
     }});
   } catch (e) {
@@ -200,12 +380,18 @@ app.post('/api/creds/yahoo', (req, res) => {
   try {
     const cm = new ConfigManager();
     const body = req.body || {};
-    cm.saveYahooCredentials({
-      clientId: body.clientId,
-      clientSecret: body.clientSecret,
+    const existing = (() => { try { return cm.loadYahooCredentials(); } catch { return null; } })();
+    const next = {
+      clientId: String(body.clientId || ''),
+      clientSecret: String(body.clientSecret || ''),
       accessToken: body.accessToken,
       refreshToken: body.refreshToken,
-    });
+    };
+    // If clientId changes, clear any stored OAuth token to avoid mismatch
+    if (existing && existing.clientId && String(existing.clientId) !== next.clientId) {
+      try { cm.deleteYahooAuthToken(); } catch {}
+    }
+    cm.saveYahooCredentials(next);
     res.json({ ok: true });
     sseBroadcast('creds', { source: 'yahoo' });
   } catch (e) {
@@ -226,8 +412,9 @@ app.post('/api/creds/gemini', (req, res) => {
 });
 
 app.post('/api/bot/run', async (req, res) => {
-  const leagueKey = req.body?.leagueKey || process.env.LEAGUE_KEY;
-  const teamKey = req.body?.teamKey || process.env.TEAM_KEY;
+  const s = new ConfigManager().loadAppSettings();
+  const leagueKey = req.body?.leagueKey || s.leagueKey;
+  const teamKey = req.body?.teamKey || s.teamKey;
   if (!leagueKey || !teamKey) {
     res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return;
   }
@@ -242,7 +429,8 @@ app.post('/api/bot/run', async (req, res) => {
 });
 
 app.get('/api/roster', async (req, res) => {
-  const teamKey = (req.query.teamKey as string) || process.env.TEAM_KEY;
+  const s = new ConfigManager().loadAppSettings();
+  const teamKey = (req.query.teamKey as string) || s.teamKey;
   if (!teamKey) {
     res.status(400).json({ ok: false, error: 'Missing teamKey' });
     return;
@@ -265,7 +453,8 @@ app.get('/api/roster', async (req, res) => {
 
 
 app.get('/api/league', async (req, res) => {
-  const leagueKey = (req.query.leagueKey as string) || process.env.LEAGUE_KEY;
+  const s = new ConfigManager().loadAppSettings();
+  const leagueKey = (req.query.leagueKey as string) || s.leagueKey;
   if (!leagueKey) {
     res.status(400).json({ ok: false, error: 'Missing leagueKey' });
     return;
@@ -393,8 +582,9 @@ app.post('/api/gemini/test', async (req, res) => {
 // Trades: incoming list
 app.get('/api/trades/incoming', async (req, res) => {
   try {
-    const leagueKey = (req.query.leagueKey as string) || process.env.LEAGUE_KEY;
-    const teamKey = (req.query.teamKey as string) || process.env.TEAM_KEY;
+    const s = new ConfigManager().loadAppSettings();
+    const leagueKey = (req.query.leagueKey as string) || s.leagueKey;
+    const teamKey = (req.query.teamKey as string) || s.teamKey;
     const debug = String(req.query.debug || '0') === '1';
     if (!leagueKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey' }); return; }
     const cm = new ConfigManager();
@@ -497,8 +687,9 @@ app.get('/api/trades/incoming', async (req, res) => {
 // Dump all transactions (normalized) for diagnostics
 app.get('/api/trades/dump', async (req, res) => {
   try {
-    const leagueKey = (req.query.leagueKey as string) || process.env.LEAGUE_KEY;
-    const teamKey = (req.query.teamKey as string) || process.env.TEAM_KEY;
+    const s = new ConfigManager().loadAppSettings();
+    const leagueKey = (req.query.leagueKey as string) || s.leagueKey;
+    const teamKey = (req.query.teamKey as string) || s.teamKey;
     const count = req.query.count ? parseInt(String(req.query.count), 10) : 200;
     const dbg = { tried: [] as string[] };
     const cm = new ConfigManager();
@@ -517,8 +708,9 @@ app.get('/api/trades/dump', async (req, res) => {
 // Trades: evaluate a specific incoming trade via Gemini
 app.post('/api/trades/evaluate', async (req, res) => {
   try {
-    const leagueKey = req.body?.leagueKey || process.env.LEAGUE_KEY;
-    const teamKey = req.body?.teamKey || process.env.TEAM_KEY;
+    const s = new ConfigManager().loadAppSettings();
+    const leagueKey = req.body?.leagueKey || s.leagueKey;
+    const teamKey = req.body?.teamKey || s.teamKey;
     const tradeId = req.body?.tradeId; // e.g., 461.l.399238.pt.2
     if (!leagueKey || !teamKey || !tradeId) { res.status(400).json({ ok: false, error: 'Missing leagueKey, teamKey, or tradeId' }); return; }
     const cm = new ConfigManager();
@@ -551,7 +743,8 @@ app.post('/api/trades/evaluate', async (req, res) => {
 // Trades: respond (accept/decline)
 app.post('/api/trades/respond', async (req, res) => {
   try {
-    const leagueKey = req.body?.leagueKey || process.env.LEAGUE_KEY;
+    const s = new ConfigManager().loadAppSettings();
+    const leagueKey = req.body?.leagueKey || s.leagueKey;
     const tradeId = req.body?.tradeId;
     const accept = !!req.body?.accept;
     if (!leagueKey || !tradeId) { res.status(400).json({ ok: false, error: 'Missing leagueKey or tradeId' }); return; }
@@ -569,7 +762,8 @@ app.post('/api/trades/respond', async (req, res) => {
 // Trades: fetch by key or trid
 app.get('/api/trades/by-key', async (req, res) => {
   try {
-    const leagueKey = (req.query.leagueKey as string) || process.env.LEAGUE_KEY;
+    const s = new ConfigManager().loadAppSettings();
+    const leagueKey = (req.query.leagueKey as string) || s.leagueKey;
     const trid = req.query.trid as string | undefined;
     const transactionKey = req.query.transactionKey as string | undefined;
     if (!transactionKey && (!leagueKey || !trid)) {
@@ -590,8 +784,9 @@ app.get('/api/trades/by-key', async (req, res) => {
 // Trade block (needs/surplus)
 app.get('/api/trade-block', async (req, res) => {
   try {
-    const leagueKey = (req.query.leagueKey as string) || process.env.LEAGUE_KEY;
-    const teamKey = (req.query.teamKey as string) || process.env.TEAM_KEY;
+    const s2 = new ConfigManager().loadAppSettings();
+    const leagueKey = (req.query.leagueKey as string) || s2.leagueKey;
+    const teamKey = (req.query.teamKey as string) || s2.teamKey;
     const force = String(req.query.force || '0') === '1';
     if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
     const cacheKey = `${leagueKey}::${teamKey}`;
@@ -643,8 +838,9 @@ app.get('/api/trade-block', async (req, res) => {
 app.post('/api/gemini/preview', async (req, res) => {
   try {
     const type = String(req.body?.type || 'lineup');
-    let leagueKey = req.body?.leagueKey || process.env.LEAGUE_KEY;
-    const teamKey = req.body?.teamKey || process.env.TEAM_KEY;
+    const s3 = new ConfigManager().loadAppSettings();
+    let leagueKey = req.body?.leagueKey || s3.leagueKey;
+    const teamKey = req.body?.teamKey || s3.teamKey;
     const theirTeamKey = req.body?.theirTeamKey || '';
     const cm = new ConfigManager();
     const oauth = new YahooOAuthClient(cm);
@@ -824,22 +1020,39 @@ app.post('/api/logs/clear', (_req, res) => {
 });
 
 app.get('/api/env', (_req, res) => {
-  res.json({
-    ok: true,
-    leagueKey: appSettings.leagueKey || null,
-    teamKey: appSettings.teamKey || null,
-    schedule: {
-      enabled: appSettings.scheduleEnabled,
-      hour: appSettings.scheduleHour,
-      minute: appSettings.scheduleMinute,
-    },
-    features: {
-      kickoffEnabled: !!appSettings.kickoffEnabled,
-      irAutomationEnabled: !!appSettings.irAutomationEnabled,
-      waiverAutomationEnabled: !!appSettings.waiverAutomationEnabled,
-      tradesAutomationEnabled: !!appSettings.tradesAutomationEnabled,
-    },
-  });
+  try {
+    const s = new ConfigManager().loadAppSettings();
+    try { res.setHeader('Cache-Control', 'no-store'); } catch {}
+    res.json({
+      ok: true,
+      leagueKey: s.leagueKey || null,
+      teamKey: s.teamKey || null,
+      schedule: { enabled: s.scheduleEnabled, hour: s.scheduleHour, minute: s.scheduleMinute },
+      features: {
+        kickoffEnabled: !!s.kickoffEnabled,
+        irAutomationEnabled: !!s.irAutomationEnabled,
+        waiverAutomationEnabled: !!s.waiverAutomationEnabled,
+        tradesAutomationEnabled: !!s.tradesAutomationEnabled,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+// Persist leagueKey/teamKey into app-settings (no env fallback)
+app.post('/api/env', (req, res) => {
+  try {
+    const body = req.body || {};
+    const cm = new ConfigManager();
+    const s = cm.loadAppSettings();
+    const leagueKey = String(body.leagueKey || s.leagueKey || '');
+    const teamKey = String(body.teamKey || s.teamKey || '');
+    const updated = cm.saveAppSettings({ ...s, leagueKey, teamKey });
+    res.json({ ok: true, leagueKey: updated.leagueKey, teamKey: updated.teamKey });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: (e as Error).message });
+  }
 });
 
 app.post('/api/schedule', (req, res) => {
@@ -880,6 +1093,7 @@ app.post('/api/schedule', (req, res) => {
 app.get('/api/features', (_req, res) => {
   const cm = new ConfigManager();
   const app = cm.loadAppSettings();
+  try { res.setHeader('Cache-Control', 'no-store'); } catch {}
   res.json({ ok: true, features: {
     kickoffEnabled: !!app.kickoffEnabled,
     irAutomationEnabled: !!app.irAutomationEnabled,
@@ -888,20 +1102,69 @@ app.get('/api/features', (_req, res) => {
   }});
 });
 
+// ---------- Manual run endpoints (kickoff, IR, waivers, trades) ----------
+function resolveKeys(req: express.Request): { leagueKey: string; teamKey: string } {
+  const s = new ConfigManager().loadAppSettings();
+  const body: any = (req as any).body || {};
+  const leagueKey = String(body.leagueKey || req.query.leagueKey || s.leagueKey || '').trim();
+  const teamKey = String(body.teamKey || req.query.teamKey || s.teamKey || '').trim();
+  return { leagueKey, teamKey };
+}
+
+app.post('/api/run/kickoff', async (req, res) => {
+  try {
+    const { leagueKey, teamKey } = resolveKeys(req);
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+    const bot = new BotController({ leagueKey, teamKey });
+    await bot.runKickoffCheck();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+app.post('/api/run/ir', async (req, res) => {
+  try {
+    const { leagueKey, teamKey } = resolveKeys(req);
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+    const bot = new BotController({ leagueKey, teamKey });
+    await bot.runIR();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+app.post('/api/run/waivers', async (req, res) => {
+  try {
+    const { leagueKey, teamKey } = resolveKeys(req);
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+    const bot = new BotController({ leagueKey, teamKey });
+    await bot.runWaivers();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+app.post('/api/run/trades', async (req, res) => {
+  try {
+    const { leagueKey, teamKey } = resolveKeys(req);
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+    const bot = new BotController({ leagueKey, teamKey });
+    await bot.runTrades();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 function deriveWaiverSchedule(): { day: number; hour: number; minute: number } {
-  // 1) Env overrides
-  const envDay = process.env.WAIVER_DAY; const envHour = process.env.WAIVER_HOUR; const envMin = process.env.WAIVER_MINUTE;
   const app = new ConfigManager().loadAppSettings();
   if (app.waiverDay !== undefined || app.waiverHour !== undefined || app.waiverMinute !== undefined) {
     const day = parseInt(String(app.waiverDay ?? '2'), 10) || 2;
     const hour = parseInt(String(app.waiverHour ?? '7'), 10) || 7;
     const minute = parseInt(String(app.waiverMinute ?? '0'), 10) || 0;
-    return { day, hour, minute };
-  }
-  if (envDay !== undefined || envHour !== undefined || envMin !== undefined) {
-    const day = parseInt(String(envDay ?? '2'), 10) || 2;
-    const hour = parseInt(String(envHour ?? '7'), 10) || 7;
-    const minute = parseInt(String(envMin ?? '0'), 10) || 0;
     return { day, hour, minute };
   }
   // 2) League profile (config/league_setting.json)
@@ -983,6 +1246,8 @@ app.post('/api/features', (req, res) => {
       app = new ConfigManager().saveAppSettings({ ...app, tradesAutomationEnabled: enableT });
       // No dedicated scheduler; handled in daily runs
     }
+    // Keep in-memory snapshot in sync so /api/env reflects latest values
+    try { appSettings = app; } catch {}
     res.json({ ok: true, features: {
       kickoffEnabled: !!app.kickoffEnabled,
       irAutomationEnabled: !!app.irAutomationEnabled,
@@ -994,12 +1259,15 @@ app.post('/api/features', (req, res) => {
   }
 });
 
-export function startServer(portOverride?: number): Promise<http.Server> {
+export function startServer(portOverride?: number): Promise<http.Server | https.Server> {
   const port = portOverride ?? defaultPort;
   return new Promise((resolve) => {
-    const server = app.listen(port, () => {
-      // eslint-disable-next-line no-console
-      console.log(`Web dashboard listening on http://localhost:${port}`);
+    const enableHttps = String(process.env.ENABLE_HTTPS || '0') === '1';
+    const certPath = process.env.SSL_CERT_PATH || '';
+    const keyPath = process.env.SSL_KEY_PATH || '';
+    const httpsPort = parseInt(process.env.HTTPS_PORT || String(port), 10);
+
+    const startPostHooks = () => {
       // Optionally enable kickoff checks
       try {
         const app = new ConfigManager().loadAppSettings();
@@ -1046,6 +1314,44 @@ export function startServer(portOverride?: number): Promise<http.Server> {
           });
         }
       } catch {}
+    };
+
+    // If HTTPS is enabled and the main port equals HTTPS port, run HTTPS-only on that port
+    if (enableHttps && httpsPort === port && certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+      try {
+        const creds = { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) } as any;
+        const httpsServer = https.createServer(creds, app);
+        httpsServer.listen(port, () => {
+          console.log(`Web dashboard listening on https://localhost:${port}`);
+          (global as any).__httpsServer = httpsServer;
+          startPostHooks();
+          resolve(httpsServer);
+        });
+        return;
+      } catch (e) {
+        console.warn('HTTPS startup error:', (e as Error).message);
+      }
+    }
+
+    const server = app.listen(port, () => {
+      // eslint-disable-next-line no-console
+      console.log(`Web dashboard listening on http://localhost:${port}`);
+      startPostHooks();
+      // Optionally also start HTTPS listener for callbacks (e.g., localhost:3000)
+      try {
+        if (enableHttps && certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath) && httpsPort !== port) {
+          const creds = { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) } as any;
+          const httpsServer = https.createServer(creds, app);
+          httpsServer.listen(httpsPort, () => {
+            console.log(`HTTPS listener active on https://localhost:${httpsPort}`);
+          });
+          (global as any).__httpsServer = httpsServer;
+        } else if (enableHttps && httpsPort !== port) {
+          console.warn('ENABLE_HTTPS=1 set but SSL_CERT_PATH/SSL_KEY_PATH not found; HTTPS not started.');
+        }
+      } catch (e) {
+        console.warn('HTTPS startup error:', (e as Error).message);
+      }
       resolve(server);
   });
 });

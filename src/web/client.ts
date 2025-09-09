@@ -248,6 +248,43 @@ function initHandlers() {
 
 document.addEventListener('DOMContentLoaded', () => { initHandlers(); refreshAll(); });
 
+// If Yahoo auth is missing, redirect to login page for setup
+(async () => {
+  try {
+    // Don't run on login page
+    if (location.pathname.toLowerCase().includes('/login')) return;
+    // Avoid immediate redirect right after a successful connect
+    if (new URLSearchParams(location.search).get('yahoo') === 'connected') return;
+    const r = await fetch('/api/creds');
+    const j = await r.json();
+    const y = j && j.creds && j.creds.yahoo;
+    if (!y) {
+      // No Yahoo client creds at all – go to login
+      location.href = '/login.html';
+      return;
+    }
+    if (!y.hasRefresh) {
+      // Has client ID/secret but not connected yet – send to login for connect
+      location.href = '/login.html';
+    }
+  } catch {}
+})();
+
+// No env prefill; Yahoo creds must be saved via dashboard (secure store)
+
+// Handle post-OAuth success indicator in URL
+(() => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('yahoo') === 'connected') {
+      setTimeout(() => alert('Yahoo connected successfully.'), 50);
+      params.delete('yahoo');
+      const url = window.location.pathname + (params.toString() ? ('?' + params.toString()) : '');
+      window.history.replaceState({}, document.title, url);
+    }
+  } catch {}
+})();
+
 // ---------------- League Profile (Scoring & Settings) ----------------
 async function getLeagueKeyForConfig(): Promise<string> {
   try { const env = await fetchJson('/api/env'); return env.leagueKey || ''; } catch { return ''; }

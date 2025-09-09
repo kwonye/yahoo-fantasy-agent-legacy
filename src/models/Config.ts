@@ -30,6 +30,8 @@ export interface AppSettings {
   waiverDay?: number;   // 0=Sun ... 6=Sat
   waiverHour?: number;  // 0-23
   waiverMinute?: number;// 0-59
+  // Consolidated bot configuration (migrated from bot-config.json and env)
+  bot?: BotConfig;
 }
 
 export interface ApiCredentials {
