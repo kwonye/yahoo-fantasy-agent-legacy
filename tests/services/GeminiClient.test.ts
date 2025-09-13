@@ -8,7 +8,7 @@ describe('GeminiClient', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    process.env = { ...originalEnv, GEMINI_API_KEY: 'key', GEMINI_MODEL: 'gemini-1.5-flash' };
+    process.env = { ...originalEnv, GEMINI_API_KEY: 'key', GEMINI_MODEL: 'gemini-2.5-flash' };
     mock = new MockAdapter(axios);
   });
 
@@ -38,7 +38,7 @@ describe('GeminiClient', () => {
     const decision = await client.optimizeLineup(
       [],
       { rosterPositions: {}, waiverType: 'FAAB', tradeDeadline: new Date(), playoffWeeks: [], scoringType: 'h2h' },
-      { riskTolerance: RiskLevel.MODERATE, positionPriorities: {}, tradingEnabled: true, waiverWireEnabled: true, maxWaiverClaims: 3, tradeThreshold: 0, applyChanges: false },
+      { applyChanges: false },
       { week: 1, season: 2024, leagueSettings: {} as any }
     );
     expect(decision.confidence).toBeCloseTo(0.9);
@@ -55,12 +55,6 @@ describe('GeminiClient', () => {
       })
     ));
     const res = await client.evaluateWaiver([], {
-      riskTolerance: RiskLevel.MODERATE,
-      positionPriorities: {},
-      tradingEnabled: true,
-      waiverWireEnabled: true,
-      maxWaiverClaims: 3,
-      tradeThreshold: 0,
       applyChanges: false,
     }, 2, { week: 1, season: 2024, leagueSettings: {} as any });
     expect(res.claims.length).toBe(1);
@@ -72,12 +66,6 @@ describe('GeminiClient', () => {
       JSON.stringify({ shouldTrade: false, reasoning: 'Not favorable', confidence: 0.7, expectedValue: -2 })
     ));
     const res = await client.evaluateTrade([], [], {
-      riskTolerance: RiskLevel.CONSERVATIVE,
-      positionPriorities: {},
-      tradingEnabled: true,
-      waiverWireEnabled: true,
-      maxWaiverClaims: 2,
-      tradeThreshold: 1,
       applyChanges: false,
     }, { week: 1, season: 2024, leagueSettings: {} as any });
     expect(res.shouldTrade).toBe(false);

@@ -15,8 +15,10 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write src/**/*.ts",
-    "web": "ts-node src/web/server.ts",
-    "web:dev": "nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"ts-node src/web/server.ts\""
+        "web": "node dist/web/server.js > server_output.log 2>&1",
+    "web:https": "ENABLE_HTTPS=1 SSL_CERT_PATH=config/certs/cert.pem SSL_KEY_PATH=config/certs/key.pem ts-node src/web/server.ts",
+    "web:dev": "nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"npx ts-node src/web/server.ts\"",
+    "web:dev:https": "ENABLE_HTTPS=1 SSL_CERT_PATH=config/certs/cert.pem SSL_KEY_PATH=config/certs/key.pem nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"npx ts-node src/web/server.ts\""
   },
   "keywords": [
     "fantasy-football",

@@ -35,6 +35,7 @@ export interface TradeProposal {
 
 export interface TradeDecision {
   proposal?: TradeProposal;
+  proposals?: TradeProposal[]; // optional: allow multiple proposed trades
   shouldTrade: boolean;
   reasoning: string;
   confidence: number;

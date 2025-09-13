@@ -52,3 +52,61 @@ src/
 
 tests/             # Test files
 ```
+
+## Docker (Production)
+
+The repo includes a slim, production-ready Dockerfile and a docker-compose.yml to get you running quickly.
+
+### Quick Start
+
+1) Copy the example env and set required values:
+
+```
+cp .env.example .env
+```
+
+At minimum set:
+
+- `CONFIG_ENCRYPTION_KEY` – a strong key to encrypt credentials (e.g., output of `openssl rand -hex 32`)
+  (Set Gemini API key in the dashboard under Credentials.)
+
+2) Bring up the stack (builds the production image):
+
+```
+docker compose up --build
+```
+
+3) Open the dashboard:
+
+- https://localhost:3000
+
+Notes:
+
+- HTTPS is enabled by default. If `config/certs/cert.pem` and `config/certs/key.pem` are missing, a self‑signed certificate is generated on container start.
+- Data persists via bind mounts:
+  - `config/` – league settings, TLS certs
+  - `logs/` – server and Yahoo/Gemini logs
+  - `.secure/` – encrypted credentials (Yahoo/Gemini)
+- For actual Yahoo writes, enable “Apply Changes” from the dashboard (Features). Yahoo writes always use XML.
+
+### Dev Compose (optional)
+
+An additional `docker-compose.example.yml` is provided for a dev workflow with bind‑mounted source and live reload. Copy and adapt as needed:
+
+```
+cp docker-compose.example.yml docker-compose.dev.yml
+```
+
+Run with:
+
+```
+docker compose -f docker-compose.dev.yml up --build
+```
+
+## Environment Variables (Common)
+
+- `CONFIG_ENCRYPTION_KEY` – required to encrypt credentials in `.secure/`.
+- Gemini API key is saved via the dashboard (Credentials) and not read from environment.
+  Toggle “Apply Changes” from the dashboard (Features) to perform live writes.
+  (Yahoo writes always use XML; no separate env variable required.)
+- `ENABLE_HTTPS` – `1` to enable HTTPS (compose defaults to `1`). Certs are expected under `config/certs` and will be generated if missing.

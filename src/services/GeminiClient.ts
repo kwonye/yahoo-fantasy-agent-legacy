@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { ConfigManager } from './ConfigManager';
 import { GeminiQuota } from './GeminiQuota';
 import { AnalysisContext, BotConfig, LeagueSettings, LineupDecision } from '../models';
 import { Player } from '../models/Player';
@@ -13,7 +14,7 @@ type GeminiTextResponse = {
 
 export interface GeminiClientOptions {
   apiKey?: string;
-  model?: string; // e.g., gemini-1.5-flash
+  model?: string; // e.g., gemini-2.5-flash
   baseUrl?: string; // e.g., https://generativelanguage.googleapis.com/v1beta
 }
 
@@ -25,9 +26,23 @@ export class GeminiClient {
   private readonly quota: GeminiQuota;
 
   constructor(opts: GeminiClientOptions = {}) {
-    this.apiKey = opts.apiKey ?? process.env.GEMINI_API_KEY ?? '';
-    if (!this.apiKey) throw new Error('GEMINI_API_KEY is required');
-    this.model = opts.model ?? process.env.GEMINI_MODEL ?? 'gemini-1.5-flash';
+    // Prefer explicit option, then env, then secure store via ConfigManager
+    let key = opts.apiKey ?? '';
+    if (!key) {
+      try {
+        const cm = new ConfigManager();
+        const creds = cm.loadGeminiCredentials();
+        if (creds?.apiKey) key = creds.apiKey;
+      } catch {}
+    }
+    this.apiKey = key;
+    if (!this.apiKey) throw new Error('Gemini API key is required. Save it via the dashboard.');
+    // Prefer model from stored creds; fallback to option or default
+    let model = opts.model;
+    if (!model) {
+      try { const cm = new ConfigManager(); const creds = cm.loadGeminiCredentials(); model = creds?.model; } catch {}
+    }
+    this.model = model || 'gemini-2.5-flash';
     this.baseUrl = (opts.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
     this.http = axios.create();
     this.quota = new GeminiQuota();
@@ -37,44 +52,101 @@ export class GeminiClient {
   async optimizeLineup(
     roster: Player[],
     leagueSettings: LeagueSettings,
-    preferences: BotConfig,
+    config: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<LineupDecision> {
     const system = 'You are a fantasy football lineup optimizer. Respond with JSON only.';
-    const user = this.buildLineupPrompt(roster, leagueSettings, preferences, context);
-    const text = await this.generate(system, user, { kind: 'lineup', roster, leagueSettings, preferences, context });
+    const user = this.buildLineupPrompt(roster, leagueSettings, context);
+    const text = await this.generate(system, user, { kind: 'lineup', roster, leagueSettings, preferences: config, context });
     return this.parseJson<LineupDecision>(text, 'LineupDecision');
   }
 
   async evaluateWaiver(
     availablePlayers: Player[],
-    preferences: BotConfig,
+    config: BotConfig,
     maxClaims: number,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<WaiverDecision> {
-    const system = 'You are a fantasy football waiver-wire analyst. Respond with JSON only.';
-    const user = this.buildWaiverPrompt(availablePlayers, preferences, maxClaims, context);
-    const text = await this.generate(system, user, { kind: 'waivers', availablePlayers, preferences, maxClaims, context });
+    const system = 'You are a fantasy football free-agent pickups strategist. Respond with JSON only.';
+    const user = this.buildWaiverPrompt(availablePlayers, maxClaims, context);
+    const text = await this.generate(system, user, { kind: 'waivers', availablePlayers, preferences: config, maxClaims, context });
     return this.parseJson<WaiverDecision>(text, 'WaiverDecision');
+  }
+
+  // Immediate pickups (free agents now): require explicit dropPlayerId for each add
+  async evaluateImmediatePickups(
+    availablePlayers: Player[],
+    myRoster: Player[],
+    maxAdds: number,
+    context: Omit<AnalysisContext, 'userPreferences'>
+  ): Promise<WaiverDecision> {
+    const system = 'You are a fantasy football free-agent pickups strategist. Respond with JSON only.';
+    const user = this.buildImmediatePickupPrompt(availablePlayers, myRoster, maxAdds, context);
+    const text = await this.generate(system, user, { kind: 'pickups', availablePlayers, myRoster, maxAdds, context });
+    return this.parseJson<WaiverDecision>(text, 'ImmediatePickups');
+  }
+
+  // Propose a single drop candidate from my roster for a given add
+  async suggestDropForAdd(
+    addPlayerId: string,
+    myRoster: Player[],
+    context: Omit<AnalysisContext, 'userPreferences'>
+  ): Promise<{ dropPlayerId: string; reasoning: string }>{
+    const system = 'You are a fantasy football roster manager. Respond with JSON only.';
+    const rosterLite = Array.isArray(myRoster)
+      ? myRoster.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
+      : [];
+    const lp: any = (context as any)?.leagueProfile;
+    const scoring = lp?.scoring || {};
+    const meta = lp?.meta || {};
+    const user = [
+      'Task: Choose exactly ONE player from my current roster to DROP to make room for the specified ADD.',
+      'Constraints: dropPlayerId MUST be one of the ids in MyRoster JSON and MUST NOT equal the AddPlayerId. Return only ids, no names.',
+      'Rules: Respond with JSON only. No commentary. Return a single object with dropPlayerId and reasoning.',
+      'Schema: { "dropPlayerId": string, "reasoning": string }',
+      '',
+      `AddPlayerId: ${addPlayerId}`,
+      'MyRoster JSON:',
+      JSON.stringify(rosterLite, null, 2),
+      'LeagueProfileMeta JSON:',
+      JSON.stringify(meta, null, 2),
+      'LeagueScoring JSON:',
+      JSON.stringify(scoring, null, 2),
+      'Context JSON:',
+      JSON.stringify(context, null, 2),
+    ].join('\n');
+    const text = await this.generate(system, user, { kind: 'pickups-drop', addPlayerId, myRoster, context });
+    return this.parseJson<{ dropPlayerId: string; reasoning: string }>(text, 'SuggestDrop');
   }
 
   async evaluateTrade(
     myRoster: Player[],
     theirRoster: Player[],
-    preferences: BotConfig,
+    config: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<TradeDecision> {
     const system = 'You are a fantasy football trade evaluator. Respond with JSON only.';
-    const user = this.buildTradePrompt(myRoster, theirRoster, preferences, context);
-    const text = await this.generate(system, user, { kind: 'trade', myRoster, theirRoster, preferences, context });
+    const user = this.buildTradePrompt(myRoster, theirRoster, context);
+    const text = await this.generate(system, user, { kind: 'trade', myRoster, theirRoster, preferences: config, context });
     return this.parseJson<TradeDecision>(text, 'TradeDecision');
+  }
+
+  async evaluateTradesMulti(
+    myRoster: Player[],
+    opponents: Array<{ teamKey: string; teamName?: string; roster: Player[] }>,
+    config: BotConfig,
+    context: Omit<AnalysisContext, 'userPreferences'>
+  ): Promise<TradeDecision> {
+    const system = 'You are a fantasy football trade strategist. Respond with JSON only.';
+    const user = this.buildTradeMultiPrompt(myRoster, opponents, context);
+    const text = await this.generate(system, user, { kind: 'trade-multi', myRoster, opponentsCount: opponents.length, preferences: config, context });
+    return this.parseJson<TradeDecision>(text, 'TradeDecisionMulti');
   }
 
   // --------- Previews (for diagnostics) ---------
   static previewLineup(
     roster: Player[],
     leagueSettings: LeagueSettings,
-    preferences: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): { system: string; user: string } {
     const system = 'You are a fantasy football lineup optimizer. Respond with JSON only.';
@@ -118,8 +190,7 @@ export class GeminiClient {
       JSON.stringify(meta, null, 2),
       'LeagueScoring JSON:',
       JSON.stringify(scoring, null, 2),
-      'Preferences JSON:',
-      JSON.stringify(preferences, null, 2),
+
       'Context JSON:',
       JSON.stringify(context, null, 2),
       rosterCount === 0 ? 'NOTE: roster array is empty. If no players provided, return a conservative no-change recommendation with low confidence.' : '',
@@ -129,7 +200,6 @@ export class GeminiClient {
 
   static previewWaivers(
     players: Player[],
-    preferences: BotConfig,
     maxClaims: number,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): { system: string; user: string } {
@@ -138,15 +208,15 @@ export class GeminiClient {
       ? players.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
       : [];
     const user = [
-      'Task: Evaluate waiver wire players and propose up to maxClaims prioritized claims.',
+      'Task: Evaluate FREE AGENTS (not players on waivers) and propose up to maxClaims prioritized add/drop claims.',
       'Rules: Respond with JSON only. No commentary.',
+      'Constraints: Only consider players who are immediate free agents and can be added now (not on waivers).',
       'Schema: { "claims": Array<{ "playerId": string, "dropPlayerId"?: string, "priority": number, "reasoning": string }>, "reasoning": string, "confidence": number, "expectedValue": number }',
       '',
       `Available Count: ${lite.length}`,
       'AvailablePlayers JSON:',
       JSON.stringify(lite, null, 2),
-      'Preferences JSON:',
-      JSON.stringify(preferences, null, 2),
+
       'MaxClaims:',
       String(maxClaims),
       'Context JSON:',
@@ -158,7 +228,6 @@ export class GeminiClient {
   static previewTrade(
     myRoster: Player[],
     theirRoster: Player[],
-    preferences: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): { system: string; user: string } {
     const system = 'You are a fantasy football trade evaluator. Respond with JSON only.';
@@ -169,9 +238,9 @@ export class GeminiClient {
       ? theirRoster.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
       : [];
     const user = [
-      'Task: Assess whether to propose a beneficial trade between two teams.',
+      'Task: Propose one or more mutually beneficial trades between two teams.',
       'Rules: Respond with JSON only. No commentary.',
-      'Schema: { "shouldTrade": boolean, "reasoning": string, "confidence": number, "expectedValue": number, "proposal"?: { "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string } }',
+      'Schema: { "shouldTrade": boolean, "reasoning": string, "confidence": number, "expectedValue": number, "proposal"?: { "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string }, "proposals"?: Array<{ "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string }> }',
       '',
       `My Count: ${mine.length}`,
       'MyRoster JSON:',
@@ -179,8 +248,7 @@ export class GeminiClient {
       `Their Count: ${theirs.length}`,
       'TheirRoster JSON:',
       JSON.stringify(theirs, null, 2),
-      'Preferences JSON:',
-      JSON.stringify(preferences, null, 2),
+
       'Context JSON:',
       JSON.stringify(context, null, 2),
     ].join('\n');
@@ -257,10 +325,9 @@ export class GeminiClient {
   previewLineupPrompt(
     roster: Player[],
     leagueSettings: LeagueSettings,
-    preferences: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): { system: string; user: string } {
-    return GeminiClient.previewLineup(roster, leagueSettings, preferences, context);
+    return GeminiClient.previewLineup(roster, leagueSettings, context);
   }
 
   // --------- Core API call ---------
@@ -301,7 +368,6 @@ export class GeminiClient {
   private buildLineupPrompt(
     roster: Player[],
     leagueSettings: LeagueSettings,
-    preferences: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): string {
     const rosterLite = Array.isArray(roster)
@@ -344,8 +410,7 @@ export class GeminiClient {
       JSON.stringify(meta, null, 2),
       'LeagueScoring JSON:',
       JSON.stringify(scoring, null, 2),
-      'Preferences JSON:',
-      JSON.stringify(preferences, null, 2),
+
       'Context JSON:',
       JSON.stringify(context, null, 2),
       rosterCount === 0 ? 'NOTE: roster array is empty. If no players provided, return a conservative no-change recommendation with low confidence.' : '',
@@ -354,7 +419,6 @@ export class GeminiClient {
 
   private buildWaiverPrompt(
     players: Player[],
-    preferences: BotConfig,
     maxClaims: number,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): string {
@@ -391,10 +455,45 @@ export class GeminiClient {
       JSON.stringify(meta, null, 2),
       'LeagueScoring JSON:',
       JSON.stringify(scoring, null, 2),
-      'Preferences JSON:',
-      JSON.stringify(preferences, null, 2),
+
       'MaxClaims:',
       String(maxClaims),
+      'Context JSON:',
+      JSON.stringify(context, null, 2),
+    ].join('\n');
+  }
+
+  private buildImmediatePickupPrompt(
+    availablePlayers: Player[],
+    myRoster: Player[],
+    maxAdds: number,
+    context: Omit<AnalysisContext, 'userPreferences'>
+  ): string {
+    const availableLite = Array.isArray(availablePlayers)
+      ? availablePlayers.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
+      : [];
+    const rosterLite = Array.isArray(myRoster)
+      ? myRoster.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
+      : [];
+    const lp: any = (context as any)?.leagueProfile;
+    const scoring = lp?.scoring || {};
+    const meta = lp?.meta || {};
+    return [
+      'Task: Recommend immediate FREE-AGENT pickups (not waivers) and specify exactly which current rostered players to DROP for each ADD.',
+      'Guidance: Prioritize near-term impact and positional needs. You MUST include a dropPlayerId for every claim. Order by priority (1 = highest). Do not include bidAmount.',
+      'Constraints: dropPlayerId MUST be one of the ids in MyRoster JSON and MUST NOT equal the playerId being added. Return only ids, no names.',
+      'Rules: Respond with JSON only. No commentary.',
+      'Schema: { "claims": Array<{ "playerId": string, "dropPlayerId": string, "priority": number, "reasoning": string }>, "reasoning": string, "confidence": number, "expectedValue": number }',
+      '',
+      `MaxAdds: ${maxAdds}`,
+      'AvailablePlayers JSON:',
+      JSON.stringify(availableLite, null, 2),
+      'MyRoster JSON:',
+      JSON.stringify(rosterLite, null, 2),
+      'LeagueProfileMeta JSON:',
+      JSON.stringify(meta, null, 2),
+      'LeagueScoring JSON:',
+      JSON.stringify(scoring, null, 2),
       'Context JSON:',
       JSON.stringify(context, null, 2),
     ].join('\n');
@@ -403,7 +502,6 @@ export class GeminiClient {
   private buildTradePrompt(
     myRoster: Player[],
     theirRoster: Player[],
-    preferences: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): string {
     const mine = Array.isArray(myRoster)
@@ -416,10 +514,10 @@ export class GeminiClient {
     const scoring = lp?.scoring || {};
     const meta = lp?.meta || {};
     return [
-      'Task: Assess whether to propose a beneficial trade between two teams.',
-      'Guidance: Infer my team\'s positional needs/surplus from roster depth vs required starters and prefer trades that improve balance and expected utility. Do not use fixed/static priorities.',
+      'Task: Propose one or more mutually beneficial trades between two teams.',
+      'Guidance: Infer my positional needs/surplus from roster depth vs required starters. Prefer trades that improve expected utility and roster balance. Be realistic with few players per side. If recommending multiple, order by expected value.',
       'Rules: Respond with JSON only. No commentary.',
-      'Schema: { "shouldTrade": boolean, "reasoning": string, "confidence": number, "expectedValue": number, "proposal"?: { "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string } }',
+      'Schema: { "shouldTrade": boolean, "reasoning": string, "confidence": number, "expectedValue": number, "proposal"?: { "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string }, "proposals"?: Array<{ "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string }> }',
       '',
       `My Count: ${mine.length}`,
       'MyRoster JSON:',
@@ -431,8 +529,47 @@ export class GeminiClient {
       JSON.stringify(meta, null, 2),
       'LeagueScoring JSON:',
       JSON.stringify(scoring, null, 2),
-      'Preferences JSON:',
-      JSON.stringify(preferences, null, 2),
+
+      'Context JSON:',
+      JSON.stringify(context, null, 2),
+    ].join('\n');
+  }
+
+  private buildTradeMultiPrompt(
+    myRoster: Player[],
+    opponents: Array<{ teamKey: string; teamName?: string; roster: Player[] }>,
+    context: Omit<AnalysisContext, 'userPreferences'>
+  ): string {
+    const mine = Array.isArray(myRoster)
+      ? myRoster.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
+      : [];
+    const opps = Array.isArray(opponents)
+      ? opponents.map((o) => ({
+          teamKey: o.teamKey,
+          teamName: o.teamName,
+          roster: (o.roster || []).map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status })),
+        }))
+      : [];
+    const lp: any = (context as any)?.leagueProfile;
+    const scoring = lp?.scoring || {};
+    const meta = lp?.meta || {};
+    return [
+      'Task: From my roster and opponent rosters, propose up to 3 mutually beneficial trades (can be with one or multiple opponents).',
+      'Guidance: Infer my positional needs/surplus from roster depth vs required starters. Prefer trades that improve expected utility and roster balance. Use few players per side. If shouldTrade is true, you MUST include either a proposal or a proposals array (ordered by expected value).',
+      'Rules: Respond with JSON only. No commentary.',
+      'Schema: { "shouldTrade": boolean, "reasoning": string, "confidence": number, "expectedValue": number, "proposal"?: { "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string }, "proposals"?: Array<{ "myPlayers": string[], "theirPlayers": string[], "targetTeamId": string, "reasoning": string }> }',
+      '',
+      `My Count: ${mine.length}`,
+      'MyRoster JSON:',
+      JSON.stringify(mine, null, 2),
+      `Opponents Count: ${opps.length}`,
+      'Opponents JSON:',
+      JSON.stringify(opps, null, 2),
+      'LeagueProfileMeta JSON:',
+      JSON.stringify(meta, null, 2),
+      'LeagueScoring JSON:',
+      JSON.stringify(scoring, null, 2),
+
       'Context JSON:',
       JSON.stringify(context, null, 2),
     ].join('\n');

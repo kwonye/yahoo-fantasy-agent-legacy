@@ -17,13 +17,13 @@ async function ensureAuth(oauth: YahooOAuthClient, mgr: ConfigManager) {
     const token = await oauth.getValidAccessToken();
     return token;
   } catch (e) {
-    const redirectUri = process.env.REDIRECT_URI || 'http://localhost:3000/oauth/callback';
+    const redirectUri = process.env.REDIRECT_URI || `https://localhost:${process.env.PORT || 3000}/oauth/callback`;
     const state = crypto.randomBytes(8).toString('hex');
     const url = oauth.getAuthorizationUrl(redirectUri, state);
     console.log('Yahoo auth required. Two options:');
     console.log('1) Start the web dashboard (npm run web), then click "Connect Yahoo".');
     console.log('   Redirect URI should be registered as:', redirectUri);
-    console.log('   Dashboard URL: http://localhost:3000/auth/yahoo/start');
+    console.log(`   Dashboard URL: https://localhost:${process.env.PORT || 3000}/auth/yahoo/start`);
     console.log('');
     console.log('2) Manual flow (advanced): open this URL and complete consent,');
     console.log('   then copy the code from the redirect URL and exchange via a one-off script:');

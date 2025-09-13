@@ -93,24 +93,8 @@ async function refreshGemini() {
 
 function escapeHtml(s: string): string { return String(s).replace(/[&<>\"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]); }
 
-function loadConfigPrefs() {
-  const rt = lsGet('cfg_riskTolerance',''); if (rt && $('riskTolerance')) ($('riskTolerance') as AnyEl).value = rt;
-  const te = lsGet('cfg_tradingEnabled',''); if (te && $('tradingEnabled')) ($('tradingEnabled') as AnyEl).checked = te==='1';
-  const we = lsGet('cfg_waiverWireEnabled',''); if (we && $('waiverWireEnabled')) ($('waiverWireEnabled') as AnyEl).checked = we==='1';
-  const ac = lsGet('cfg_applyChanges',''); if (ac && $('applyChanges')) ($('applyChanges') as AnyEl).checked = ac==='1';
-  const mw = lsGet('cfg_maxWaiverClaims',''); if (mw && $('maxWaiverClaims')) ($('maxWaiverClaims') as AnyEl).value = mw;
-  const tt = lsGet('cfg_tradeThreshold',''); if (tt && $('tradeThreshold')) ($('tradeThreshold') as AnyEl).value = tt;
-}
-function saveConfigPrefs() {
-  const rt = (($('riskTolerance')||{}) as AnyEl).value || '';
-  const te = (($('tradingEnabled')||{}) as AnyEl).checked ? '1' : '0';
-  const we = (($('waiverWireEnabled')||{}) as AnyEl).checked ? '1' : '0';
-  const ac = (($('applyChanges')||{}) as AnyEl).checked ? '1' : '0';
-  const mw = (($('maxWaiverClaims')||{}) as AnyEl).value || '';
-  const tt = (($('tradeThreshold')||{}) as AnyEl).value || '';
-  lsSet('cfg_riskTolerance', rt); lsSet('cfg_tradingEnabled', te); lsSet('cfg_waiverWireEnabled', we);
-  lsSet('cfg_applyChanges', ac); lsSet('cfg_maxWaiverClaims', mw); lsSet('cfg_tradeThreshold', tt);
-}
+
+
 
 async function refreshRoster() {
   const leagueKey = (($('leagueKeyInput')||{}) as AnyEl).value || '';
@@ -160,11 +144,10 @@ async function refreshRoster() {
 async function refreshAll() {
   try {
     setJson('health', await fetchJson('/health'));
+    
     const cfg = await fetchJson('/api/config'); setJson('config', cfg);
-    if (cfg && cfg.config) fillConfig(cfg.config);
-    loadConfigPrefs();
     const creds = await fetchJson('/api/creds'); const cs = $('credsStatus'); if (cs) cs.textContent = JSON.stringify(creds?.creds||{}, null, 2); setCredsSummary(creds);
-    setBadges(cfg.config, creds);
+    setBadges(cfg, creds);
     setMetricsSummary(await fetchJson('/api/metrics'));
     const act = await fetchJson('/api/activity'); renderActivity(act.events || []);
     await refreshGemini();
@@ -175,38 +158,18 @@ async function refreshAll() {
   } catch (e) { console.error(e); }
 }
 
-function fillConfig(c: any) {
-  ( $('riskTolerance') as AnyEl ).value = c.riskTolerance;
-  ( $('tradingEnabled') as AnyEl ).checked = !!c.tradingEnabled;
-  ( $('waiverWireEnabled') as AnyEl ).checked = !!c.waiverWireEnabled;
-  ( $('applyChanges') as AnyEl ).checked = !!c.applyChanges;
-  ( $('maxWaiverClaims') as AnyEl ).value = String(c.maxWaiverClaims);
-  ( $('tradeThreshold') as AnyEl ).value = String(c.tradeThreshold);
-}
+
 
 function initHandlers() {
-  $('cfgForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const body = { bot: {
-      riskTolerance: ( $('riskTolerance') as AnyEl ).value || 'MODERATE',
-      tradingEnabled: !!( $('tradingEnabled') as AnyEl ).checked,
-      waiverWireEnabled: !!( $('waiverWireEnabled') as AnyEl ).checked,
-      applyChanges: !!( $('applyChanges') as AnyEl ).checked,
-      maxWaiverClaims: parseInt( ( $('maxWaiverClaims') as AnyEl ).value || '0', 10),
-      tradeThreshold: parseFloat( ( $('tradeThreshold') as AnyEl ).value || '0'),
-    } };
-    const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const j = await r.json(); alert(j.ok ? 'Config saved' : 'Save failed: ' + j.error);
-    saveConfigPrefs(); refreshAll();
-  });
-  $('resetCfgBtn')?.addEventListener('click', async () => { await fetch('/api/config'); refreshAll(); });
+  
+  
   $('yahooForm')?.addEventListener('submit', async (e) => {
     e.preventDefault(); const body = { clientId: ( $('yClientId') as AnyEl ).value || '', clientSecret: ( $('yClientSecret') as AnyEl ).value || '' };
     const r = await fetch('/api/creds/yahoo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json(); alert(j.ok ? 'Yahoo creds saved' : 'Save failed: ' + j.error); refreshAll();
   });
   $('geminiForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault(); const body = { apiKey: ( $('gApiKey') as AnyEl ).value || '' };
-    const r = await fetch('/api/creds/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json(); alert(j.ok ? 'Gemini key saved' : 'Save failed: ' + j.error); refreshAll();
+    e.preventDefault(); const body = { apiKey: ( $('gApiKey') as AnyEl ).value || '', model: ( $('gModel') as AnyEl ).value || '' };
+    const r = await fetch('/api/creds/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json(); alert(j.ok ? 'Gemini settings saved' : 'Save failed: ' + j.error); refreshAll();
   });
   $('runBotForm')?.addEventListener('submit', async (e) => {
     e.preventDefault(); const leagueKey = ( $('leagueKeyInput') as AnyEl ).value || ''; const teamKey = ( $('teamKeyInput') as AnyEl ).value || '';

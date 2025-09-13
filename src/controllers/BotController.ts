@@ -32,19 +32,21 @@ export class BotController {
     const cfgMgr = new ConfigManager();
     const oauth = new YahooOAuthClient(cfgMgr);
     this.yahoo = new YahooApiService(oauth);
-    this.write = new YahooWriteAdapter(this.yahoo);
+    this.write = new YahooWriteAdapter(this.yahoo, { debugYahoo: process.env.DEBUG_YAHOO === '1' });
     this.logger = new Logger({ service: 'bot' });
     this.audit = new AuditTrail();
     this.metrics = new Metrics();
-    const botCfg = cfgMgr.getBotConfig();
+    
     // Initialize Gemini if available; skip otherwise to avoid unnecessary prompt calls
     let decisions: DecisionService | null = null;
     try {
-      if (process.env.GEMINI_API_KEY) {
+      const cm = new ConfigManager();
+      const g = cm.loadGeminiCredentials();
+      if (g && g.apiKey) {
         const gemini = new GeminiClient();
-        decisions = new DecisionService(gemini, botCfg);
+        decisions = new DecisionService(gemini);
       } else {
-        this.logger.warn('GEMINI_API_KEY missing; skipping AI decisions');
+        this.logger.warn('Gemini API key missing (save it in the dashboard); skipping AI decisions');
       }
     } catch (e) {
       this.logger.warn('Gemini initialization failed; skipping AI decisions', { error: (e as Error).message });
@@ -76,6 +78,13 @@ export class BotController {
       } else {
         this.audit.recordAction('waivers_skipped', { reason: 'waiver_automation_disabled' });
       }
+      // Immediate pickups (FA add/drop) daily pass
+      if (app.pickupsAutomationEnabled) {
+        if (this.quota.getRemaining() > 0) await this.processPickups();
+        else this.audit.recordAction('pickups_skipped', { reason: 'quota_exhausted' });
+      } else {
+        this.audit.recordAction('pickups_skipped', { reason: 'pickups_automation_disabled' });
+      }
       if (app.tradesAutomationEnabled) {
         // Respect trade deadline if provided in league profile
         try {
@@ -99,6 +108,42 @@ export class BotController {
       }
     });
     this.audit.recordAction('daily_end');
+  }
+
+  // Evaluate immediate free-agent pickups and apply add/drops (strict drop enforcement when roster full)
+  private async processPickups() {
+    try {
+      if (!this.decisions) { this.audit.recordAction('pickups_skipped', { reason: 'gemini_unavailable' }); return; }
+      this.audit.recordAction('pickups_start');
+      const league = await this.yahoo.getLeague(this.leagueKey);
+      const teamInfo = await this.yahoo.getTeamInfo(this.teamKey);
+      const available = await this.yahoo.getFreeAgents(this.leagueKey, 50);
+      if (!Array.isArray(available) || available.length === 0) { this.audit.recordAction('pickups_skipped', { reason: 'no_available_players' }); return; }
+      const entries = await this.yahoo.getTeamRosterWithSlots(this.teamKey);
+      const myRoster = entries.map((e) => e.player);
+      const decision = await (this.decisions as any).gemini.evaluateImmediatePickups(available, myRoster, 2, { week: league.currentWeek, season: league.season, leagueSettings: league.settings });
+      // Enforce strict drops if roster full
+      const rp: Record<string, number> = (league?.settings?.rosterPositions || {}) as any;
+      const cap = Object.entries(rp).reduce((sum, [pos, cnt]) => { const up = String(pos || '').toUpperCase(); if (up==='IR') return sum; const n=Number(cnt); return sum + (Number.isFinite(n)?n:0); }, 0);
+      const nonIrCount = entries.filter((e: any) => String(e.slot || '').toUpperCase() !== 'IR').length;
+      const rosterFull = nonIrCount >= cap && cap > 0;
+      const write = this.write;
+      if (rosterFull) {
+        // If any missing, skip to avoid Yahoo rejection
+        const missing = (decision.claims || []).some((c: any) => !c.dropPlayerId);
+        if (missing) { this.audit.recordAction('pickups_skipped', { reason: 'missing_drops' }); return; }
+      }
+      const app = new ConfigManager().loadAppSettings();
+      if (app.applyChanges && (decision.claims || []).length > 0) {
+        const res = await write.applyPickups(this.leagueKey, this.teamKey, decision as any);
+        this.audit.recordAction(res.success ? 'pickups_applied' : 'pickups_apply_failed', { claims: decision.claims });
+      } else {
+        this.audit.recordAction('pickups_dry_run', { claims: decision.claims });
+      }
+      this.audit.recordAction('pickups_end');
+    } catch (e) {
+      this.audit.recordAction('pickups_unavailable', { error: (e as Error).message });
+    }
   }
 
   // Public wrapper for weekly waiver scheduler
@@ -138,7 +183,7 @@ export class BotController {
         this.audit.recordAction('hygiene_noop');
         return;
       }
-      const apply = (this.decisions as any)?.config?.applyChanges === true;
+      const apply = app.applyChanges === true;
       if (apply) {
         const res = await this.write.applyAssignments(this.teamKey, assignments as any);
         this.audit.recordAction(res.success ? 'hygiene_applied' : 'hygiene_apply_failed', { count: assignments.length });
@@ -294,7 +339,8 @@ export class BotController {
       this.logger.info('Waiver decision', { count: res.claims.length, confidence: res.confidence });
       this.audit.recordAction('waivers_result', { count: res.claims.length, confidence: res.confidence });
       if (res.claims.length > 0) {
-        const applyW = (this.decisions as any)['config']?.applyChanges === true;
+        const app = new ConfigManager().loadAppSettings();
+        const applyW = app.applyChanges === true;
         if (applyW) {
           try {
             const out = await this.write.applyWaivers(this.leagueKey, res);
@@ -368,28 +414,55 @@ export class BotController {
           }
         }
       } catch {}
-      // For now, evaluate trades with our roster vs empty (placeholder); future work: iterate over opponents
+      // Build my roster once
       const myEntries = await this.yahoo.getTeamRosterWithSlots(this.teamKey);
       const my = myEntries.map((e) => e.player);
-      if (my.length === 0) {
-        this.audit.recordAction('trades_skipped', { reason: 'empty_roster' });
-        return;
+      if (my.length === 0) { this.audit.recordAction('trades_skipped', { reason: 'empty_roster' }); return; }
+
+      // Fetch all league teams and build opponent roster list
+      let opponentTeams: Array<{ key: string; name?: string }> = [];
+      try { opponentTeams = await this.yahoo.getLeagueTeams(this.leagueKey); } catch {}
+      const myKeySuffix = (() => { const idx = this.teamKey.lastIndexOf('.t.'); return idx > 0 ? this.teamKey.slice(idx + 3) : ''; })();
+      const isMe = (k: string) => k === this.teamKey || (myKeySuffix && k.endsWith('.t.' + myKeySuffix));
+      const candidates = (opponentTeams || []).filter((t) => t?.key && !isMe(String(t.key)));
+      if (candidates.length === 0) { this.audit.recordAction('trades_skipped', { reason: 'no_other_teams' }); return; }
+
+      // Pull each opponent roster (Yahoo calls), then single Gemini call for the best trade across all
+      const oppList: Array<{ teamKey: string; teamName?: string; roster: any[] }> = [];
+      for (const opp of candidates) {
+        try {
+          const entries = await this.yahoo.getTeamRosterWithSlots(String(opp.key));
+          const their = entries.map((e) => e.player);
+          if (their.length > 0) oppList.push({ teamKey: String(opp.key), teamName: opp.name, roster: their });
+        } catch (e) {
+          this.audit.recordError(e as Error, { phase: 'fetchOpponentRoster', opponent: opp.key });
+        }
       }
-      const res = await this.decisions.decideTrade(my, [], {
+      if (oppList.length === 0) { this.audit.recordAction('trades_skipped', { reason: 'no_opponent_rosters' }); return; }
+
+      this.audit.recordAction('trade_multi_eval_start', { opponents: oppList.length });
+      const res = await this.decisions.decideTradeMulti(my, oppList, {
         week: league.currentWeek,
         season: league.season,
         leagueSettings: league.settings,
         leagueProfile,
       } as any);
+      this.audit.recordAction('trade_multi_eval_end', { shouldTrade: res.shouldTrade, expectedValue: res.expectedValue, confidence: res.confidence });
       if (!res.shouldTrade || !res.proposal) {
         this.logger.info('No trade proposed', { confidence: res.confidence, expectedValue: res.expectedValue });
         this.audit.recordAction('trades_no_proposal', { confidence: res.confidence, expectedValue: res.expectedValue });
         return;
       }
-      const applyT = (this.decisions as any)['config']?.applyChanges === true;
+      if (!res.shouldTrade || !res.proposal) {
+        this.logger.info('No trade proposed', { confidence: res.confidence, expectedValue: res.expectedValue });
+        this.audit.recordAction('trades_no_proposal', { confidence: res.confidence, expectedValue: res.expectedValue });
+        return;
+      }
+      const app = new ConfigManager().loadAppSettings();
+      const applyT = app.applyChanges === true;
       if (applyT) {
         try {
-          const out = await this.write.applyTrade(this.leagueKey, res);
+          const out = await this.write.applyTrade(this.leagueKey, this.teamKey, res);
           const decision: BotDecision = {
             id: `trade-${Date.now()}`,
             type: DecisionType.TRADE_PROPOSAL,
@@ -430,7 +503,8 @@ export class BotController {
   private async processIncomingTradeOffers() {
     try {
       if (!this.decisions) { this.audit.recordAction('trades_incoming_skipped', { reason: 'gemini_unavailable' }); return; }
-      if (!(this.decisions as any)?.config?.tradingEnabled) { this.audit.recordAction('trades_incoming_skipped', { reason: 'trading_disabled' }); return; }
+      const app = new ConfigManager().loadAppSettings();
+      if (!app.tradesAutomationEnabled) { this.audit.recordAction('trades_incoming_skipped', { reason: 'trading_disabled' }); return; }
       // Respect season trade cap from league profile
       try {
         const cfgMgr = new ConfigManager();
@@ -481,7 +555,8 @@ export class BotController {
           this.audit.recordError(e as Error, { phase: 'trades_incoming_eval', tradeId });
           accept = false;
         }
-        const apply = (this.decisions as any)['config']?.applyChanges === true;
+        const app = new ConfigManager().loadAppSettings();
+        const apply = app.applyChanges === true;
         if (apply) {
           const res = await this.write.applyTradeResponse(this.leagueKey, tradeId, accept);
           this.audit.recordAction(res.success ? (accept ? 'trade_auto_accepted' : 'trade_auto_declined') : 'trade_auto_response_failed', { tradeId });

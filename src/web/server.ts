@@ -19,7 +19,7 @@ dotenv.config();
 
 const app = express();
 app.set('trust proxy', true);
-const defaultPort = parseInt(process.env.PORT || process.env.HTTPS_PORT || '3000', 10);
+const defaultPort = parseInt(process.env.PORT || '3000', 10);
 let scheduler: Scheduler | null = null;
 // runtime state is sourced from AppSettings
 const cmInit = new ConfigManager();
@@ -65,7 +65,8 @@ function computeRedirectUri(req: express.Request, overridePath?: '/auth/callback
     return env;
   }
   // Otherwise, derive from request and use /auth/callback as default path
-  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+  const inferred = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+  const proto = 'https';
   const host = req.headers.host || `localhost:${defaultPort}`;
   const path = overridePath ?? '/auth/callback';
   return `${proto}://${host}${path}`;
@@ -242,17 +243,9 @@ app.get('/api/stream', (req, res) => {
     clearInterval(heartbeat);
     sseClients.delete(res);
   });
+
 });
 
-app.get('/api/config', (_req, res) => {
-  try {
-    const cm = new ConfigManager();
-    const cfg = cm.getBotConfig();
-    res.json({ ok: true, config: cfg });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: (e as Error).message });
-  }
-});
 
 // Gemini quota status
 app.get('/api/quota', (_req, res) => {
@@ -339,16 +332,7 @@ app.get('/api/schedule/preview', (_req, res) => {
   }
 });
 
-app.post('/api/config', (req, res) => {
-  try {
-    const cm = new ConfigManager();
-    const saved = cm.savePreferences(req.body?.bot ?? {});
-    res.json({ ok: true, config: saved });
-    sseBroadcast('config', { ok: true });
-  } catch (e) {
-    res.status(400).json({ ok: false, error: (e as Error).message });
-  }
-});
+
 
 function mask(s?: string) {
   if (!s) return '';
@@ -364,14 +348,15 @@ app.get('/api/creds', (_req, res) => {
     try { yahoo = cm.loadYahooCredentials(); } catch {}
     try { gemini = cm.loadGeminiCredentials(); } catch {}
     if (yahoo) source = 'store';
-    if (!gemini) {
-      try { const envG = cm.getEnvCredentials().gemini; gemini = envG; } catch {}
-    }
-    res.json({ ok: true, creds: {
+    // Do not fallback to environment for Gemini API key; require saving via dashboard
+    const responseData = { ok: true, creds: {
       yahoo: yahoo ? { clientId: mask(yahoo.clientId), hasRefresh: !!yahoo.refreshToken, source } : null,
-      gemini: gemini ? { apiKey: mask(gemini.apiKey) } : null,
-    }});
+      gemini: gemini ? { apiKey: mask(gemini.apiKey), model: (gemini as any).model || 'gemini-2.5-flash' } : null,
+    }};
+    console.log('[/api/creds] Sending response:', responseData);
+    res.json(responseData);
   } catch (e) {
+    console.error('[/api/creds] Error:', e);
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
 });
@@ -403,7 +388,7 @@ app.post('/api/creds/gemini', (req, res) => {
   try {
     const cm = new ConfigManager();
     const body = req.body || {};
-    cm.saveGeminiCredentials({ apiKey: body.apiKey });
+    cm.saveGeminiCredentials({ apiKey: String(body.apiKey || ''), model: body.model ? String(body.model) : undefined });
     res.json({ ok: true });
     sseBroadcast('creds', { source: 'gemini' });
   } catch (e) {
@@ -488,7 +473,6 @@ app.get('/api/league-config', (_req, res) => {
           const preferredOrder = (name: string) =>
             name === 'league_setting.json' ? 0 :
             name.toLowerCase().includes('league') ? 1 :
-            name === 'bot-config.json' ? 3 :
             2;
           files.sort((a: string, b: string) => preferredOrder(a) - preferredOrder(b));
           const chosen = files[0];
@@ -565,16 +549,75 @@ app.post('/api/gemini/test', async (req, res) => {
   try {
     // Ensure API key present and a prompt provided
     const cm = new ConfigManager();
-    let hasKey = !!process.env.GEMINI_API_KEY;
-    if (!hasKey) {
-      try { const g = cm.loadGeminiCredentials(); hasKey = !!g?.apiKey; } catch {}
-    }
-    if (!hasKey) { res.status(400).json({ ok: false, error: 'GEMINI_API_KEY missing' }); return; }
+    let hasKey = false;
+    try { const g = cm.loadGeminiCredentials(); hasKey = !!g?.apiKey; } catch {}
+    if (!hasKey) { res.status(400).json({ ok: false, error: 'Gemini API key missing (save it in the dashboard).' }); return; }
     if (!prompt) { res.status(400).json({ ok: false, error: 'Prompt is required' }); return; }
     const client = new GeminiClient();
     const text = await client.generate(system, prompt);
     res.json({ ok: true, response: text });
   } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+app.post('/api/test/trade', async (req, res) => {
+  try {
+    const leagueKey = req.body?.leagueKey || '461.l.12345'; // Use a real league key here
+    const myTeamKey = req.body?.myTeamKey || '461.l.12345.t.1'; // Use a real team key here
+
+    const cm = new ConfigManager();
+    const oauth = new YahooOAuthClient(cm);
+    const api = new YahooApiService(oauth);
+    const write = new (require('../services/YahooWriteAdapter').YahooWriteAdapter)(api, { debugYahoo: true });
+
+    // 1. Fetch league data to confirm authentication
+    const league = await api.getLeague(leagueKey);
+    if (!league) {
+      res.status(400).json({ ok: false, error: 'Could not fetch league data. Check leagueKey and Yahoo authentication.' });
+      return;
+    }
+
+    // 2. Get my team's roster and find a kicker
+    const myRoster = await api.getTeamRosterWithSlots(myTeamKey);
+    const myKicker = myRoster.find(p => p.player.position === 'K');
+    if (!myKicker) {
+      res.status(400).json({ ok: false, error: 'Could not find a kicker in your roster.' });
+      return;
+    }
+
+    // 3. Get opponent's team and find a defense
+    const allTeams = await api.getLeagueTeams(leagueKey);
+    const opponentTeam = allTeams.find(team => team.key !== myTeamKey);
+    if (!opponentTeam) {
+      res.status(400).json({ ok: false, error: 'Could not find an opponent team in the league.' });
+      return;
+    }
+    const opponentRoster = await api.getTeamRosterWithSlots(opponentTeam.key);
+    const opponentDefense = opponentRoster.find(p => p.player.position === 'DEF');
+    if (!opponentDefense) {
+      res.status(400).json({ ok: false, error: 'Could not find a defense in opponent\'s roster.' });
+      return;
+    }
+
+    const dummyDecision = {
+      shouldTrade: true,
+      reasoning: 'Trade proposal: My Kicker for your Defense',
+      confidence: 1.0,
+      expectedValue: 100,
+      proposal: {
+        myPlayers: [myKicker.player.id],
+        theirPlayers: [opponentDefense.player.id],
+        targetTeamId: opponentTeam.key,
+        reasoning: 'Trade proposal: My Kicker for your Defense',
+      },
+    };
+
+    const out = await write.applyTrade(leagueKey, myTeamKey, dummyDecision);
+
+    res.json({ ok: out.success, id: out.id, message: out.success ? 'Trade proposed' : 'Trade proposal failed' });
+  } catch (e) {
+    console.error('Error in /api/test/trade:', e); // Log the error
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
 });
@@ -781,6 +824,260 @@ app.get('/api/trades/by-key', async (req, res) => {
   }
 });
 
+// Trades: request Gemini to propose a trade for my team and optionally apply it
+app.post('/api/trades/apply', async (req, res) => {
+  try {
+    const s = new ConfigManager().loadAppSettings();
+    const leagueKey = req.body?.leagueKey || s.leagueKey;
+    const teamKey = req.body?.teamKey || s.teamKey;
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+
+    const cm = new ConfigManager();
+    const oauth = new YahooOAuthClient(cm);
+    const api = new YahooApiService(oauth);
+    const write = new (require('../services/YahooWriteAdapter').YahooWriteAdapter)(api);
+
+    // Build my roster and opponents list
+    const league = await api.getLeague(leagueKey);
+    const myEntries = await api.getTeamRosterWithSlots(teamKey);
+    const myRoster = myEntries.map((e) => e.player);
+    // Gather opponent teams
+    let opponentTeams: Array<{ key: string; name?: string }> = [];
+    try { opponentTeams = await api.getLeagueTeams(leagueKey); } catch {}
+    const myKeySuffix = (() => { const idx = String(teamKey).lastIndexOf('.t.'); return idx > 0 ? String(teamKey).slice(idx + 3) : ''; })();
+    const isMe = (k: string) => k === teamKey || (myKeySuffix && String(k).endsWith('.t.' + myKeySuffix));
+    const candidates = (opponentTeams || []).filter((t) => t?.key && !isMe(String(t.key)));
+    const oppList: Array<{ teamKey: string; teamName?: string; roster: any[] }> = [];
+    for (const opp of candidates) {
+      try {
+        const entries = await api.getTeamRosterWithSlots(String(opp.key));
+        const their = entries.map((e) => e.player);
+        if (their.length > 0) oppList.push({ teamKey: String(opp.key), teamName: opp.name, roster: their });
+      } catch (e) {
+        // ignore opponent fetch errors
+      }
+    }
+
+    if (oppList.length === 0) { res.status(400).json({ ok: false, error: 'No opponent rosters available to evaluate trades' }); return; }
+
+    // Ask Gemini for the best trade across opponents
+    const gemini = new (require('../services/GeminiClient').GeminiClient)();
+    const decision = await gemini.evaluateTradesMulti(myRoster, oppList as any, { applyChanges: true }, { week: league.currentWeek, season: league.season, leagueSettings: league.settings });
+
+    // Normalize/validate Gemini proposals for Yahoo (primary + any additional)
+    const normalizeTeamKey = (raw: string): string => {
+      const gameLeaguePrefix = String(leagueKey);
+      const rawTarget = String(raw || '');
+      if (rawTarget.includes('.t.')) return rawTarget; // already a full key
+      let resolved = rawTarget;
+      if (/^\d+$/.test(rawTarget)) resolved = `${gameLeaguePrefix}.t.${rawTarget}`;
+      else if (rawTarget) {
+        const match = oppList.find(o => (o.teamName || '').toLowerCase() === rawTarget.toLowerCase());
+        if (match) resolved = match.teamKey;
+      }
+      if (!resolved.includes('.t.') && /^\d+$/.test(rawTarget)) resolved = `${gameLeaguePrefix}.t.${rawTarget}`;
+      if (!resolved.includes('.t.') && oppList.length > 0) resolved = oppList[0]!.teamKey;
+      return resolved;
+    };
+    if (decision) {
+      if (decision.proposal) (decision as any).proposal.targetTeamId = normalizeTeamKey((decision.proposal as any).targetTeamId);
+      if (Array.isArray((decision as any).proposals)) {
+        (decision as any).proposals = (decision as any).proposals.map((p: any) => ({ ...p, targetTeamId: normalizeTeamKey(p.targetTeamId) }));
+      }
+    }
+
+    const appSettings = new ConfigManager().loadAppSettings();
+    const forceApply = req.body?.forceApply === true || String(req.body?.forceApply || '').toLowerCase() === 'true';
+    const willApply = (appSettings.applyChanges === true || forceApply) && decision.shouldTrade && !!decision.proposal;
+    let applyResult: any = { success: false };
+    let appliedAll: Array<{ index: number; success: boolean; id?: string; targetTeamId?: string }> = [];
+    if (willApply) {
+      // Build list of proposals to apply (primary first, then any extras)
+      const list: any[] = [];
+      if (decision.proposal) list.push(decision.proposal);
+      if (Array.isArray((decision as any).proposals)) {
+        for (const p of (decision as any).proposals) {
+          // Avoid duplicating the primary if identical
+          if (!decision.proposal || JSON.stringify(p) !== JSON.stringify(decision.proposal)) list.push(p);
+        }
+      }
+      // Limit to 3 to be safe
+      const toApply = list.slice(0, 3);
+      for (let i = 0; i < toApply.length; i++) {
+        const p = toApply[i];
+        const single: any = { shouldTrade: true, reasoning: p.reasoning || decision.reasoning, confidence: decision.confidence, expectedValue: decision.expectedValue, proposal: p };
+        try {
+          const out = await write.applyTrade(leagueKey, teamKey, single);
+          if (i === 0) applyResult = out;
+          appliedAll.push({ index: i, success: !!out?.success, id: out?.id, targetTeamId: p?.targetTeamId });
+        } catch {
+          if (i === 0) applyResult = { success: false };
+          appliedAll.push({ index: i, success: false, targetTeamId: p?.targetTeamId });
+        }
+      }
+    }
+
+    res.json({ ok: true, decision, applied: applyResult, appliedAll, appliedCount: appliedAll.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+// Pickups: ask Gemini for immediate pickup/drop moves and apply them (FA adds), not waiver claims
+app.post('/api/pickups/apply', async (req, res) => {
+  try {
+    const s = new ConfigManager().loadAppSettings();
+    const leagueKey = req.body?.leagueKey || s.leagueKey;
+    const teamKey = req.body?.teamKey || s.teamKey;
+    const max = Number.isFinite(Number(req.body?.max)) ? Number(req.body.max) : 3;
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+
+    const cm = new ConfigManager();
+    const oauth = new YahooOAuthClient(cm);
+    const api = new YahooApiService(oauth);
+    const write = new (require('../services/YahooWriteAdapter').YahooWriteAdapter)(api);
+    const { GeminiClient } = require('../services/GeminiClient');
+    const gemini = new GeminiClient();
+
+    const league = await api.getLeague(leagueKey);
+    const teamInfo = await api.getTeamInfo(teamKey);
+    const available = await api.getFreeAgents(leagueKey, 50);
+    if (!Array.isArray(available) || available.length === 0) { res.status(400).json({ ok: false, error: 'No available players found' }); return; }
+
+    const context = { week: league.currentWeek, season: league.season, leagueSettings: league.settings } as any;
+    const myEntries = await api.getTeamRosterWithSlots(teamKey);
+    const myRoster = myEntries.map((e) => e.player);
+    let decision = await gemini.evaluateImmediatePickups(available, myRoster, Math.max(1, Math.min(5, max)), context);
+    // Ensure we don’t exceed max and strip any accidental bidAmount fields
+    decision = { ...decision, claims: (decision.claims || []).slice(0, Math.max(1, Math.min(5, max))).map((c: any) => ({ playerId: c.playerId, dropPlayerId: c.dropPlayerId, priority: c.priority, reasoning: c.reasoning })) } as any;
+
+    // Pre-check: ensure adds are truly free agents (eligible now)
+    try {
+      const faSet = new Set((available || []).map((p: any) => String(p.id)));
+      const filtered = (decision.claims || []).filter((c: any) => faSet.has(String(c.playerId)));
+      if (filtered.length === 0) { res.status(400).json({ ok: false, error: 'No eligible free agents to add', reason: 'not_free_agents' }); return; }
+      decision.claims = filtered;
+    } catch {}
+
+    // Determine if roster is full based on league rosterPositions (exclude IR slots)
+    const rp: Record<string, number> = (league?.settings?.rosterPositions || {}) as any;
+    const cap = Object.entries(rp).reduce((sum, [pos, cnt]) => {
+      const up = String(pos || '').toUpperCase();
+      if (up === 'IR') return sum; // ignore IR slots
+      const n = Number(cnt);
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    const nonIrCount = myEntries.filter((e: any) => String(e.slot || '').toUpperCase() !== 'IR').length;
+    let rosterFull = nonIrCount >= cap && cap > 0;
+    if (String((req as any).body?.forceFull || '').toLowerCase() === 'true') rosterFull = true;
+
+    // If roster is full, require drops; fill missing via Gemini drop-suggestion per add when possible
+    if (rosterFull) {
+      const { GeminiClient } = require('../services/GeminiClient');
+      const gem = new GeminiClient();
+      const myEntries = await api.getTeamRosterWithSlots(teamKey);
+      const myRosterFull = myEntries.map((e) => e.player);
+      for (let i = 0; i < (decision.claims || []).length; i++) {
+        const c: any = (decision.claims as any)[i];
+        if (!c.dropPlayerId) {
+          try {
+            const d = await gem.suggestDropForAdd(String(c.playerId), myRosterFull, context);
+            if (d?.dropPlayerId && String(d.dropPlayerId) !== String(c.playerId)) {
+              c.dropPlayerId = String(d.dropPlayerId);
+              if (!c.reasoning) c.reasoning = d.reasoning;
+            }
+          } catch {}
+        }
+      }
+      const missingIdx: number[] = [];
+      (decision.claims || []).forEach((c: any, i: number) => { if (!c.dropPlayerId) missingIdx.push(i); });
+      if (missingIdx.length > 0) {
+        res.status(400).json({ ok: false, error: 'Roster is full; each pickup must include dropPlayerId', rosterFull: true, missingDropIndices: missingIdx, decision });
+        return;
+      }
+    }
+
+    // If dropPlayerId not provided, heuristically assign from bench
+    try {
+      if (!rosterFull) {
+        const entries: Array<{ slot?: string; player: any }> = myEntries as any;
+        const rosterIds = entries.map(e => String(e.player.id));
+        const addSet = new Set((decision.claims || []).map((c: any) => String(c.playerId)));
+        const dropCandidates = rosterIds.filter((id) => !addSet.has(String(id))).reverse();
+        let idx = 0;
+        decision.claims = (decision.claims || []).map((c: any) => {
+          if (!c.dropPlayerId) {
+            c.dropPlayerId = dropCandidates[idx++] || c.dropPlayerId;
+          }
+          return c;
+        });
+      }
+    } catch {}
+
+    // Optional explicit drop mappings from client: [{ addPlayerId, dropPlayerId }]
+    try {
+      const drops: Array<{ addPlayerId: string; dropPlayerId: string }> = Array.isArray((req as any).body?.drops) ? (req as any).body.drops : [];
+      if (drops.length) {
+        const dropMap = new Map(drops.map((d) => [String(d.addPlayerId), String(d.dropPlayerId)]));
+        decision.claims = (decision.claims || []).map((c: any) => ({
+          ...c,
+          dropPlayerId: c.dropPlayerId || dropMap.get(String(c.playerId)),
+        }));
+      }
+    } catch {}
+
+    const appSettings = new ConfigManager().loadAppSettings();
+    const forceApply = req.body?.forceApply === true || String(req.body?.forceApply || '').toLowerCase() === 'true';
+    const willApply = (appSettings.applyChanges === true || forceApply) && decision.claims.length > 0;
+    let applied = { success: false } as any;
+    if (willApply) {
+      // Finalize drops to ensure Yahoo accepts add/drop when roster has no space
+      const entries: Array<{ slot?: string; player: any }> = await api.getTeamRosterWithSlots(teamKey);
+      const rosterIds = entries.map((e) => String(e.player.id));
+      const addSet = new Set((decision.claims || []).map((c: any) => String(c.playerId)));
+      const dropCandidates = rosterIds.filter((id) => !addSet.has(String(id))).reverse();
+      const fallbackId = rosterIds[0];
+      let di = 0;
+      let decisionWithDrops = {
+        ...decision,
+        claims: (decision.claims || []).map((c: any) => ({
+          playerId: String(c.playerId),
+          dropPlayerId: c.dropPlayerId || dropCandidates[di++] || fallbackId,
+          priority: c.priority,
+          reasoning: c.reasoning,
+        })),
+      } as any;
+      // If client provided explicit drops mapping, enforce them here (final pass)
+      try {
+        const drops: Array<{ addPlayerId: string; dropPlayerId: string }> = Array.isArray((req as any).body?.drops) ? (req as any).body.drops : [];
+        if (drops.length) {
+          const dropMap = new Map(drops.map((d) => [String(d.addPlayerId), String(d.dropPlayerId)]));
+          decisionWithDrops = {
+            ...decisionWithDrops,
+            claims: (decisionWithDrops.claims || []).map((c: any) => ({
+              ...c,
+              dropPlayerId: c.dropPlayerId || dropMap.get(String(c.playerId)),
+            })),
+          } as any;
+        }
+      } catch {}
+      // Ensure every claim has a drop before applying
+      const missingIdx2: number[] = [];
+      (decisionWithDrops.claims || []).forEach((c: any, i: number) => { if (!c.dropPlayerId) missingIdx2.push(i); });
+      if (missingIdx2.length > 0) {
+        res.status(400).json({ ok: false, error: 'Missing dropPlayerId for some pickups', rosterFull, missingDropIndices: missingIdx2, decision: decisionWithDrops });
+        return;
+      }
+      try { console.log('[Pickups] decisionWithDrops (server final):', JSON.stringify(decisionWithDrops)); } catch {}
+      applied = await write.applyPickups(leagueKey, teamKey, decisionWithDrops);
+      decision = decisionWithDrops;
+    }
+    res.json({ ok: true, decision, applied, rosterFull });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 // Trade block (needs/surplus)
 app.get('/api/trade-block', async (req, res) => {
   try {
@@ -858,9 +1155,9 @@ app.post('/api/gemini/preview', async (req, res) => {
       const entries = await api.getTeamRosterWithSlots(teamKey);
       const roster = entries.map((e) => e.player);
       if (!league?.settings || roster.length === 0) { res.status(400).json({ ok: false, error: 'Insufficient context for lineup preview' }); return; }
-      const botCfg = cm.getBotConfig();
+      const botCfg = { applyChanges: true };
       const leagueProfile = cm.loadLeagueProfile(leagueKey);
-      const { system, user } = GeminiClient.previewLineup(roster, league.settings, botCfg, {
+      const { system, user } = GeminiClient.previewLineup(roster, league.settings, {
         week: league.currentWeek,
         season: league.season,
         leagueSettings: league.settings,
@@ -883,9 +1180,9 @@ app.post('/api/gemini/preview', async (req, res) => {
         res.status(400).json({ ok: false, error: 'No waiver candidates available' });
         return;
       }
-      const botCfg = cm.getBotConfig();
+      const botCfg = { applyChanges: true };
       const leagueProfile = cm.loadLeagueProfile(leagueKey);
-      const { system, user } = GeminiClient.previewWaivers(players as any, botCfg, botCfg.maxWaiverClaims, {
+      const { system, user } = GeminiClient.previewWaivers(players as any, 100, {
         week: league.currentWeek,
         season: league.season,
         leagueSettings: league.settings,
@@ -941,9 +1238,9 @@ app.post('/api/gemini/preview', async (req, res) => {
       const mine = myEntries.map((e) => e.player);
       const theirs = theirEntries.map((e) => e.player);
       if (mine.length === 0 || theirs.length === 0) { res.status(400).json({ ok: false, error: 'Insufficient roster data for trade preview' }); return; }
-      const botCfg = cm.getBotConfig();
+      const botCfg = { applyChanges: true };
       const leagueProfile = cm.loadLeagueProfile(leagueKey);
-      const { system, user } = GeminiClient.previewTrade(mine as any, theirs as any, botCfg, {
+      const { system, user } = GeminiClient.previewTrade(mine as any, theirs as any, {
         week: league.currentWeek,
         season: league.season,
         leagueSettings: league.settings,
@@ -1023,7 +1320,7 @@ app.get('/api/env', (_req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
     try { res.setHeader('Cache-Control', 'no-store'); } catch {}
-    res.json({
+    const responseData = {
       ok: true,
       leagueKey: s.leagueKey || null,
       teamKey: s.teamKey || null,
@@ -1032,10 +1329,15 @@ app.get('/api/env', (_req, res) => {
         kickoffEnabled: !!s.kickoffEnabled,
         irAutomationEnabled: !!s.irAutomationEnabled,
         waiverAutomationEnabled: !!s.waiverAutomationEnabled,
+        pickupsAutomationEnabled: !!s.pickupsAutomationEnabled,
         tradesAutomationEnabled: !!s.tradesAutomationEnabled,
+        applyChanges: !!s.applyChanges,
       },
-    });
+    };
+    console.log('[/api/env] Sending response:', responseData);
+    res.json(responseData);
   } catch (e) {
+    console.error('[/api/env] Error:', e);
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
 });
@@ -1098,7 +1400,10 @@ app.get('/api/features', (_req, res) => {
     kickoffEnabled: !!app.kickoffEnabled,
     irAutomationEnabled: !!app.irAutomationEnabled,
     waiverAutomationEnabled: !!app.waiverAutomationEnabled,
+    pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
     tradesAutomationEnabled: !!app.tradesAutomationEnabled,
+    debugYahooEnabled: !!app.debugYahooEnabled,
+    applyChanges: !!app.applyChanges,
   }});
 });
 
@@ -1241,10 +1546,23 @@ app.post('/api/features', (req, res) => {
         }
       }
     }
+    if (body.pickupsAutomationEnabled !== undefined) {
+      const enableP = !!body.pickupsAutomationEnabled;
+      app = new ConfigManager().saveAppSettings({ ...app, pickupsAutomationEnabled: enableP });
+      // No scheduler; handled manually or as part of daily checks if desired
+    }
     if (body.tradesAutomationEnabled !== undefined) {
       const enableT = !!body.tradesAutomationEnabled;
       app = new ConfigManager().saveAppSettings({ ...app, tradesAutomationEnabled: enableT });
       // No dedicated scheduler; handled in daily runs
+    }
+    if (body.debugYahooEnabled !== undefined) {
+      const enableD = !!body.debugYahooEnabled;
+      app = new ConfigManager().saveAppSettings({ ...app, debugYahooEnabled: enableD });
+    }
+    if (body.applyChanges !== undefined) {
+      const enableApply = !!body.applyChanges;
+      app = new ConfigManager().saveAppSettings({ ...app, applyChanges: enableApply });
     }
     // Keep in-memory snapshot in sync so /api/env reflects latest values
     try { appSettings = app; } catch {}
@@ -1252,7 +1570,10 @@ app.post('/api/features', (req, res) => {
       kickoffEnabled: !!app.kickoffEnabled,
       irAutomationEnabled: !!app.irAutomationEnabled,
       waiverAutomationEnabled: !!app.waiverAutomationEnabled,
+      pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
       tradesAutomationEnabled: !!app.tradesAutomationEnabled,
+      debugYahooEnabled: !!app.debugYahooEnabled,
+      applyChanges: !!app.applyChanges,
     }});
   } catch (e) {
     res.status(400).json({ ok: false, error: (e as Error).message });
@@ -1262,10 +1583,10 @@ app.post('/api/features', (req, res) => {
 export function startServer(portOverride?: number): Promise<http.Server | https.Server> {
   const port = portOverride ?? defaultPort;
   return new Promise((resolve) => {
-    const enableHttps = String(process.env.ENABLE_HTTPS || '0') === '1';
-    const certPath = process.env.SSL_CERT_PATH || '';
-    const keyPath = process.env.SSL_KEY_PATH || '';
-    const httpsPort = parseInt(process.env.HTTPS_PORT || String(port), 10);
+    const enableHttps = true;
+    const certPath = require('path').join(process.cwd(), 'config', 'certs', 'cert.pem');
+    const keyPath = require('path').join(process.cwd(), 'config', 'certs', 'key.pem');
+    const httpsPort = port;
 
     const startPostHooks = () => {
       // Optionally enable kickoff checks
@@ -1316,13 +1637,17 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
       } catch {}
     };
 
-    // If HTTPS is enabled and the main port equals HTTPS port, run HTTPS-only on that port
-    if (enableHttps && httpsPort === port && certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    // Enforce HTTPS-only when enabled; do not fall back to HTTP
+    if (enableHttps) {
+      if (!(certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath))) {
+        console.error('HTTPS requested but TLS certs are missing or invalid. Expected at config/certs/cert.pem and config/certs/key.pem');
+        throw new Error('Missing SSL cert/key for HTTPS');
+      }
       try {
         const creds = { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) } as any;
         const httpsServer = https.createServer(creds, app);
-        httpsServer.listen(port, () => {
-          console.log(`Web dashboard listening on https://localhost:${port}`);
+        httpsServer.listen(httpsPort, () => {
+          console.log(`Web dashboard listening on https://localhost:${httpsPort}`);
           (global as any).__httpsServer = httpsServer;
           startPostHooks();
           resolve(httpsServer);
@@ -1330,31 +1655,16 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
         return;
       } catch (e) {
         console.warn('HTTPS startup error:', (e as Error).message);
+        throw e;
       }
     }
 
     const server = app.listen(port, () => {
-      // eslint-disable-next-line no-console
       console.log(`Web dashboard listening on http://localhost:${port}`);
       startPostHooks();
-      // Optionally also start HTTPS listener for callbacks (e.g., localhost:3000)
-      try {
-        if (enableHttps && certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath) && httpsPort !== port) {
-          const creds = { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) } as any;
-          const httpsServer = https.createServer(creds, app);
-          httpsServer.listen(httpsPort, () => {
-            console.log(`HTTPS listener active on https://localhost:${httpsPort}`);
-          });
-          (global as any).__httpsServer = httpsServer;
-        } else if (enableHttps && httpsPort !== port) {
-          console.warn('ENABLE_HTTPS=1 set but SSL_CERT_PATH/SSL_KEY_PATH not found; HTTPS not started.');
-        }
-      } catch (e) {
-        console.warn('HTTPS startup error:', (e as Error).message);
-      }
       resolve(server);
+    });
   });
-});
 }
 
 if (require.main === module) {

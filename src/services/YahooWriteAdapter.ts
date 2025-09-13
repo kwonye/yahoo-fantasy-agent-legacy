@@ -7,6 +7,7 @@ import { WaiverDecision, TradeDecision } from '../models/Decision';
 
 export interface YahooWriteAdapterOptions {
   dumpDir?: string; // defaults to logs/yahoo_write_payloads
+  debugYahoo?: boolean; // Added this
 }
 
 export interface LineupAssignment {
@@ -17,10 +18,19 @@ export interface LineupAssignment {
 export class YahooWriteAdapter {
   private readonly api: YahooApiService;
   private readonly dumpDir: string;
+  private readonly debugYahoo: boolean; // Dashboard-controlled
 
   constructor(api: YahooApiService, opts: YahooWriteAdapterOptions = {}) {
     this.api = api;
     this.dumpDir = opts.dumpDir ?? path.join(process.cwd(), 'logs', 'yahoo_write_payloads');
+    try {
+      const { ConfigManager } = require('./ConfigManager');
+      const cm = new ConfigManager();
+      const app = cm.loadAppSettings();
+      this.debugYahoo = opts.debugYahoo ?? !!app.debugYahooEnabled;
+    } catch {
+      this.debugYahoo = !!opts.debugYahoo;
+    }
   }
 
   planLineupAssignments(_roster: Player[], target: Lineup): LineupAssignment[] {
@@ -43,34 +53,28 @@ export class YahooWriteAdapter {
 
   async applyAssignments(teamKey: string, assignments: LineupAssignment[]): Promise<{ success: boolean }> {
     this.dump('assignments', this.buildLineupPayload(assignments));
-    if (process.env.YAHOO_XML_WRITE === '1') {
-      const xml = this.buildLineupXML(assignments);
-      this.dump('assignments.xml', xml);
-      try {
-        const res = await (this.api as any).updateRosterXml(teamKey, xml);
-        return res;
-      } catch {
-        return { success: false };
-      }
+    const xml = this.buildLineupXML(assignments);
+    this.dump('assignments.xml', xml);
+    try {
+      const res = await (this.api as any).updateRosterXml(teamKey, xml);
+      return res;
+    } catch {
+      return { success: false };
     }
-    return { success: false };
   }
 
   async applyLineup(teamKey: string, target: Lineup): Promise<{ success: boolean }> {
     const assignments = this.planLineupAssignments([], target);
     this.dump('lineup', this.buildLineupPayload(assignments));
-    // Yahoo supports writes via XML only. Require YAHOO_XML_WRITE=1.
-    if (process.env.YAHOO_XML_WRITE === '1') {
-      const xml = this.buildLineupXML(assignments);
-      this.dump('lineup.xml', xml);
-      try {
-        const res = await (this.api as any).updateRosterXml(teamKey, xml);
-        return res;
-      } catch {
-        return { success: false };
-      }
+    // Yahoo supports writes via XML only.
+    const xml = this.buildLineupXML(assignments);
+    this.dump('lineup.xml', xml);
+    try {
+      const res = await (this.api as any).updateRosterXml(teamKey, xml);
+      return res;
+    } catch {
+      return { success: false };
     }
-    return { success: false };
   }
 
   buildWaiverPayload(decision: WaiverDecision) {
@@ -86,20 +90,52 @@ export class YahooWriteAdapter {
     };
   }
 
+  buildPickupPayload(decision: WaiverDecision) {
+    return {
+      type: 'immediate_pickups',
+      moves: decision.claims.map((c) => ({ add: c.playerId, drop: c.dropPlayerId, reasoning: c.reasoning })),
+    };
+  }
+
   async applyWaivers(leagueKey: string, decision: WaiverDecision): Promise<{ success: boolean }> {
     const payload = this.buildWaiverPayload(decision);
     this.dump('waivers', payload);
-    if (process.env.YAHOO_XML_WRITE === '1') {
-      const xml = this.buildWaiverXML(leagueKey, decision);
-      this.dump('waivers.xml', xml);
-      try {
-        const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
-        return { success: res.success };
-      } catch {
-        return { success: false };
-      }
+    const xml = this.buildWaiverXML(leagueKey, decision);
+    this.dump('waivers.xml', xml);
+    try {
+      const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
+      return { success: res.success };
+    } catch {
+      return { success: false };
     }
-    return { success: false };
+  }
+
+  async applyPickups(leagueKey: string, myTeamKey: string, decision: WaiverDecision): Promise<{ success: boolean }> {
+    // Ensure drop ids exist where needed by deriving from current roster as a fallback
+    try {
+      const entries: Array<{ slot?: string; player: any }> = await (this.api as any).getTeamRosterWithSlots(myTeamKey);
+      const rosterIds = entries.map((e) => String(e.player.id));
+      const addSet = new Set((decision.claims || []).map((c) => String(c.playerId)));
+      const dropCandidates = rosterIds.filter((id) => !addSet.has(String(id))).reverse();
+      const fallbackId = rosterIds[0];
+      let idx = 0;
+      decision.claims = (decision.claims || []).map((c) => ({
+        ...c,
+        dropPlayerId: c.dropPlayerId || dropCandidates[idx++] || fallbackId || c.dropPlayerId,
+      }));
+    } catch {}
+
+    try { console.log('[Pickups] Final claims before XML:', JSON.stringify(decision.claims)); } catch {}
+    const payload = this.buildPickupPayload(decision);
+    this.dump('pickups', payload);
+    const xml = this.buildPickupXML(leagueKey, myTeamKey, decision);
+    this.dump('pickups.xml', xml);
+    try {
+      const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
+      return { success: res.success };
+    } catch {
+      return { success: false };
+    }
   }
 
   buildTradePayload(decision: TradeDecision) {
@@ -112,24 +148,32 @@ export class YahooWriteAdapter {
         targetTeamId: decision.proposal.targetTeamId,
         reasoning: decision.proposal.reasoning,
       },
+      proposals: Array.isArray(decision.proposals) ? decision.proposals.map(p => ({
+        from_me: p.myPlayers,
+        from_them: p.theirPlayers,
+        targetTeamId: p.targetTeamId,
+        reasoning: p.reasoning,
+      })) : undefined,
     };
   }
 
-  async applyTrade(leagueKey: string, decision: TradeDecision): Promise<{ success: boolean; id?: string }> {
+  // Backward-compatible signature: allow applyTrade(leagueKey, decision) for tests/helpers
+  async applyTrade(leagueKey: string, myTeamKeyOrDecision: string | TradeDecision, maybeDecision?: TradeDecision): Promise<{ success: boolean; id?: string }> {
+    const myTeamKey = typeof myTeamKeyOrDecision === 'string' ? myTeamKeyOrDecision : '';
+    const decision: TradeDecision = typeof myTeamKeyOrDecision === 'string' ? (maybeDecision as TradeDecision) : (myTeamKeyOrDecision as TradeDecision);
     const payload = this.buildTradePayload(decision);
     this.dump('trade', payload);
-    if (!decision.proposal) return { success: false };
-    if (process.env.YAHOO_XML_WRITE === '1') {
-      const xml = this.buildTradeXML(leagueKey, decision);
-      this.dump('trade.xml', xml);
-      try {
-        const res = await (this.api as any).proposeTradeXml(leagueKey, xml);
-        return res;
-      } catch {
-        return { success: false };
-      }
+    if (!decision?.proposal) return { success: false };
+    if (!myTeamKey) return { success: false }; // cannot build a valid trade without source team key
+    const xml = this.buildTradeXML(leagueKey, myTeamKey, decision);
+    this.dump('trade.xml', xml);
+    try {
+      const res = await (this.api as any).proposeTradeXml(leagueKey, xml);
+      return res;
+    } catch (e) {
+      console.error('Error proposing trade:', e);
+      return { success: false };
     }
-    return { success: false };
   }
 
   buildTradeResponseXML(leagueKey: string, tradeId: string, accept: boolean): string {
@@ -143,26 +187,35 @@ export class YahooWriteAdapter {
   }
 
   async applyTradeResponse(leagueKey: string, tradeId: string, accept: boolean): Promise<{ success: boolean }>{
-    if (process.env.YAHOO_XML_WRITE === '1') {
-      const xml = this.buildTradeResponseXML(leagueKey, tradeId, accept);
-      this.dump('trade_response.xml', xml);
-      try {
-        const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
-        return { success: res.success };
-      } catch {
-        return { success: false };
-      }
+    const xml = this.buildTradeResponseXML(leagueKey, tradeId, accept);
+    this.dump('trade_response.xml', xml);
+    try {
+      const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
+      return { success: res.success };
+    } catch {
+      return { success: false };
     }
-    return { success: false };
   }
 
   private dump(prefix: string, data: any) {
-    if (!process.env.DEBUG_YAHOO) return;
+    console.log(`--- Entering dump function for prefix: ${prefix} ---`);
+    if (!this.debugYahoo) return;
     try {
-      if (!fs.existsSync(this.dumpDir)) fs.mkdirSync(this.dumpDir, { recursive: true });
+      console.log(`Dump directory: ${this.dumpDir}`);
+      console.log(`Checking if dump directory exists: ${this.dumpDir}`); // Added this
+      const dirExists = fs.existsSync(this.dumpDir);
+      console.log(`Dump directory exists: ${dirExists}`);
+      if (!dirExists) {
+        console.log(`Attempting to create dump directory: ${this.dumpDir}`);
+        fs.mkdirSync(this.dumpDir, { recursive: true });
+        console.log('Dump directory created.');
+      }
       const file = path.join(this.dumpDir, `${Date.now()}_${prefix}.json`);
+      console.log(`Attempting to write to file: ${file}`); // Added this
       fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
-    } catch {
+      console.log('Dump successful.');
+    } catch (e) {
+      console.error('Error during dump:', e);
       // ignore
     }
   }
@@ -193,18 +246,91 @@ export class YahooWriteAdapter {
     return `<fantasy_content><transaction><type>add/drop</type><players>${items}</players></transaction></fantasy_content>`;
   }
 
-  buildTradeXML(leagueKey: string, decision: TradeDecision): string {
+  buildPickupXML(leagueKey: string, myTeamKey: string, decision: WaiverDecision): string {
+    const gameKey = leagueKey.split('.l.')[0];
+    const normalizePlayerKey = (pid: string): string => {
+      const s = String(pid);
+      if (/^\d+\.p\.\d+$/.test(s) || s.includes('.p.')) return s;
+      if (/^\d+$/.test(s)) return `${gameKey}.p.${s}`;
+      return s;
+    };
+    const items = decision.claims
+      .map((c) => {
+        const addKey = normalizePlayerKey(c.playerId);
+        const dropKey = c.dropPlayerId ? normalizePlayerKey(c.dropPlayerId) : undefined;
+        return `
+        <player>
+          <player_key>${escapeXml(addKey)}</player_key>
+          <transaction_data>
+            <type>add</type>
+            <destination_team_key>${escapeXml(myTeamKey)}</destination_team_key>
+          </transaction_data>
+        </player>
+        ${dropKey ? `<player><player_key>${escapeXml(dropKey)}</player_key><transaction_data><type>drop</type><source_team_key>${escapeXml(myTeamKey)}</source_team_key></transaction_data></player>` : ''}`;
+      })
+      .join('');
+    return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><transaction><type>add/drop</type><players>${items}</players></transaction></fantasy_content>`;
+  }
+
+  buildTradeXML(leagueKey: string, myTeamKey: string, decision: TradeDecision): string {
     if (!decision.proposal) return '<fantasy_content />';
-    const mine = (decision.proposal.myPlayers || []).map((p) => `<player_id>${escapeXml(p)}</player_id>`).join('');
-    const theirs = (decision.proposal.theirPlayers || []).map((p) => `<player_id>${escapeXml(p)}</player_id>`).join('');
-    return `<fantasy_content><trade>
-      <league_key>${escapeXml(leagueKey)}</league_key>
-      <proposed_trade>
-        <to_other_team>${escapeXml(decision.proposal.targetTeamId)}</to_other_team>
-        <my_players>${mine}</my_players>
-        <their_players>${theirs}</their_players>
-      </proposed_trade>
-    </trade></fantasy_content>`;
+
+    const traderTeamKey = myTeamKey;
+    const tradeeTeamKey = decision.proposal.targetTeamId;
+    const tradeNote = decision.proposal.reasoning || ''; // Use reasoning as trade note
+
+    let playersXml = '';
+
+    const gameKey = leagueKey.split('.l.')[0];
+    const normalizePlayerKey = (pid: string): string => {
+      const s = String(pid);
+      // If already a full player_key like "406.p.12345", use as-is
+      if (/^\d+\.p\.\d+$/.test(s) || s.includes('.p.')) return s;
+      // If numeric id, build player_key with game key
+      if (/^\d+$/.test(s)) return `${gameKey}.p.${s}`;
+      // Last resort, return as-is (Yahoo may reject if malformed)
+      return s;
+    };
+
+    // Players I am sending
+    for (const playerId of decision.proposal.myPlayers) {
+      const pkey = normalizePlayerKey(playerId);
+      playersXml += `
+        <player>
+          <player_key>${escapeXml(pkey)}</player_key>
+          <transaction_data>
+            <type>pending_trade</type>
+            <source_team_key>${escapeXml(traderTeamKey)}</source_team_key>
+            <destination_team_key>${escapeXml(tradeeTeamKey)}</destination_team_key>
+          </transaction_data>
+        </player>`;
+    }
+
+    // Players I am receiving
+    for (const playerId of decision.proposal.theirPlayers) {
+      const pkey = normalizePlayerKey(playerId);
+      playersXml += `
+        <player>
+          <player_key>${escapeXml(pkey)}</player_key>
+          <transaction_data>
+            <type>pending_trade</type>
+            <source_team_key>${escapeXml(tradeeTeamKey)}</source_team_key>
+            <destination_team_key>${escapeXml(traderTeamKey)}</destination_team_key>
+          </transaction_data>
+        </player>`;
+    }
+
+    return `<?xml version='1.0' encoding='UTF-8'?>
+<fantasy_content>
+  <transaction>
+    <type>pending_trade</type>
+    <trader_team_key>${escapeXml(traderTeamKey)}</trader_team_key>
+    <tradee_team_key>${escapeXml(tradeeTeamKey)}</tradee_team_key>
+    <trade_note>${escapeXml(tradeNote)}</trade_note>
+    <players>${playersXml}
+    </players>
+  </transaction>
+</fantasy_content>`;
   }
 }
 

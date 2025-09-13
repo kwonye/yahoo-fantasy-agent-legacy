@@ -65,7 +65,7 @@
       <div class="container-fluid">
         <a class="navbar-brand" href="#">Fantasy Football Bot</a>
         <div class="d-flex gap-2">
-          <span class="badge bg-secondary" id="modeBadge">Mode: Dry Run</span>
+          <span class="badge bg-secondary" id="modeBadge">Mode: Loading...</span>
           <span class="badge bg-secondary" id="yahooBadge">Yahoo: Unknown</span>
           <span class="badge bg-secondary" id="geminiBadge">Gemini: Unknown</span>
           <span class="badge bg-secondary" id="quotaBadge">Quota: …</span>
@@ -80,12 +80,7 @@
             <div class="card-body mono" id="health">Loading…</div>
           </div>
         </div>
-        <div class="col-lg-4">
-          <div class="card">
-            <div class="card-header">Config</div>
-            <div class="card-body mono" id="config">Loading…</div>
-          </div>
-        </div>
+        
         <div class="col-lg-4">
           <div class="card">
             <div class="card-header">Metrics</div>
@@ -104,7 +99,7 @@
               </div>
             </div>
             <div class="card-body">
-              <div class="table-responsive">
+              <div class="table-responsive" id="recentActivityTableContainer" style="max-height: 360px; overflow-y: auto;">
                 <table class="table table-sm table-striped mono">
                   <thead>
                     <tr><th>Time</th><th>Type</th><th>Details</th></tr>
@@ -190,49 +185,7 @@
       </div>
 
       <div class="row g-3 mt-1">
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header">Bot Configuration</div>
-            <div class="card-body">
-              <form id="cfgForm" class="mono">
-                <div class="mb-2">
-                  <label class="form-label">Risk Tolerance</label>
-                  <select id="riskTolerance" class="form-select form-select-sm">
-                    <option>CONSERVATIVE</option>
-                    <option>MODERATE</option>
-                    <option>AGGRESSIVE</option>
-                  </select>
-                </div>
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="tradingEnabled" />
-                  <label class="form-check-label" for="tradingEnabled">Trading Enabled</label>
-                </div>
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="waiverWireEnabled" />
-                  <label class="form-check-label" for="waiverWireEnabled">Waiver Wire Enabled</label>
-                </div>
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="applyChanges" />
-                  <label class="form-check-label" for="applyChanges">Apply Changes (live writes)</label>
-                </div>
-                <div class="row g-2">
-                  <div class="col-6">
-                    <label class="form-label">Max Waiver Claims</label>
-                    <input type="number" id="maxWaiverClaims" class="form-control form-control-sm" />
-                  </div>
-                  <div class="col-6">
-                    <label class="form-label">Trade Threshold</label>
-                    <input type="number" step="0.1" id="tradeThreshold" class="form-control form-control-sm" />
-                  </div>
-                </div>
-                <div class="mt-3 d-flex gap-2">
-                  <button type="submit" class="btn btn-sm btn-primary">Save Config</button>
-                  <button type="button" class="btn btn-sm btn-outline-secondary" id="resetCfgBtn">Reset</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+        
 
         <div class="col-lg-6">
           <div class="card">
@@ -256,7 +209,8 @@
               </form>
               <form id="geminiForm" class="mono">
                 <div class="mb-2"><label class="form-label">Gemini API Key</label><input id="gApiKey" class="form-control form-control-sm" /></div>
-                <button type="submit" class="btn btn-sm btn-secondary">Save Gemini Key</button>
+                <div class="mb-2"><label class="form-label">Gemini Model</label><input id="gModel" class="form-control form-control-sm" placeholder="gemini-2.5-flash" /></div>
+                <button type="submit" class="btn btn-sm btn-secondary">Save Gemini Settings</button>
               </form>
               <hr/>
               <form id="runBotForm" class="mono">
@@ -281,14 +235,15 @@
             <div class="card-header d-flex justify-content-between align-items-center">
               <span>League Profile (Scoring & Settings)</span>
               <div class="d-flex gap-2">
-                <button class="btn btn-sm btn-outline-secondary" id="lpLoadBtn">Load</button>
-                <button class="btn btn-sm btn-outline-primary" id="lpPrefillBtn">Prefill Sample</button>
-                <button class="btn btn-sm btn-outline-secondary" id="lpEditBtn">Edit</button>
-                <button class="btn btn-sm btn-primary" id="lpSaveBtn" style="display:none">Save</button>
-                <button class="btn btn-sm btn-outline-danger" id="lpCancelBtn" style="display:none">Cancel</button>
+                <button class="btn btn-sm btn-outline-secondary" id="lpToggleBtn" type="button">Show</button>
+                <button class="btn btn-sm btn-outline-secondary" id="lpLoadBtn" type="button">Load</button>
+                <button class="btn btn-sm btn-outline-primary" id="lpPrefillBtn" type="button">Prefill Sample</button>
+                <button class="btn btn-sm btn-outline-secondary" id="lpEditBtn" type="button">Edit</button>
+                <button class="btn btn-sm btn-primary" id="lpSaveBtn" type="button" style="display:none">Save</button>
+                <button class="btn btn-sm btn-outline-danger" id="lpCancelBtn" type="button" style="display:none">Cancel</button>
               </div>
             </div>
-            <div class="card-body">
+            <div class="card-body" id="lpBody" style="display:none">
               <div id="leagueProfileView" class="mono"></div>
               <textarea id="leagueProfileEdit" class="form-control mono" rows="12" style="display:none"></textarea>
               <div class="small text-muted mt-2">Stored under <code>config/league_setting.json</code>. Note: when a scoring row shows <code>yahooDefault: null</code>, it means the Yahoo default equals the current league value.</div>
@@ -322,19 +277,54 @@
                   </div>
                   <button class="btn btn-sm btn-outline-secondary" id="runWaiversNowBtn" type="button">Run Waivers</button>
                 </div>
-              <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                <div>
-                  <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
-                  <label class="form-check-label ms-2" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
+                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                  <div>
+                    <input class="form-check-input" type="checkbox" id="pickupsAutomationEnabled" />
+                    <label class="form-check-label ms-2" for="pickupsAutomationEnabled">Enable Auto Pickups (immediate add/drop)</label>
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="runPickupsNowBtn" type="button">Run Pickups</button>
                 </div>
-                <button class="btn btn-sm btn-outline-secondary" id="runTradesNowBtn" type="button">Run Trades</button>
-              </div>
+                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                  <div>
+                    <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
+                    <label class="form-check-label ms-2" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="runTradesNowBtn" type="button">Run Trades</button>
+                </div>
+                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                  <div>
+                    <input class="form-check-input" type="checkbox" id="debugYahooEnabled" />
+                    <label class="form-check-label ms-2" for="debugYahooEnabled">Enable Debug Logs</label>
+                  </div>
+                </div>
+                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                  <div>
+                    <input class="form-check-input" type="checkbox" id="applyChanges" />
+                    <label class="form-check-label ms-2" for="applyChanges">Apply Changes (actually execute trades, waivers, etc.)</label>
+                  </div>
+                  <div class="badge bg-warning text-dark">⚠️ Live Mode</div>
+                </div>
               <button class="btn btn-sm btn-outline-success" id="saveFeaturesBtn">Save</button>
               <div class="small text-muted mt-2" id="quotaSummary"></div>
               <hr/>
               <div>
-                <div class="fw-semibold">Upcoming Tasks</div>
-                <div id="upcomingTasks" class="small"></div>
+                <div class="fw-semibold mb-2">Upcoming Tasks</div>
+                <div class="table-responsive">
+                  <table class="table table-sm table-striped">
+                    <thead>
+                      <tr>
+                        <th>Action Type</th>
+                        <th>Scheduled Time</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody id="upcomingTasks">
+                      <tr>
+                        <td colspan="3" class="text-center text-muted">Loading...</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -374,11 +364,31 @@
           </div>
         </div>
       </div>
+      <div class="row g-3 mt-1">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header">Transactions Summary</div>
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-sm table-striped">
+                  <thead>
+                    <tr><th>Time</th><th>Type</th><th>Details</th></tr>
+                  </thead>
+                  <tbody id="txSummary"><tr><td colspan="3" class="text-muted text-center">Loading…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <script>
       async function fetchJson(url) {
+        console.log('Fetching:', url);
         const r = await fetch(url);
-        return r.json();
+        const json = await r.json();
+        console.log('Response for', url, ':', json);
+        return json;
       }
       function jsonHighlight(obj) {
         try {
@@ -416,6 +426,7 @@
       function renderActivity(events) {
         const tbody = document.getElementById('activity');
         tbody.innerHTML = '';
+        events.reverse(); // Display in descending order
         for (const ev of events) {
           const tr = document.createElement('tr');
           const ts = document.createElement('td');
@@ -440,6 +451,7 @@
         if (qb) qb.className = 'badge bg-secondary';
       }
       function setCredsSummary(creds) {
+        console.log('setCredsSummary() called with:', creds);
         const yb = document.getElementById('credsYahooBadge');
         const gb = document.getElementById('credsGeminiBadge');
         const details = document.getElementById('credsDetails');
@@ -456,8 +468,16 @@
       function setMetricsSummary(m) { setJson('metrics', m?.metrics || {}); }
       function lsGet(key, def='') { try { const v = localStorage.getItem(key); return v===null? def : v; } catch (e) { return def; } }
       function lsSet(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+      function setLpVisible(show) {
+        const body = document.getElementById('lpBody');
+        const btn = document.getElementById('lpToggleBtn');
+        if (body) body.style.display = show ? 'block' : 'none';
+        if (btn) btn.textContent = show ? 'Hide' : 'Show';
+      }
       async function fillEnvPanel() {
+        console.log('fillEnvPanel() called');
         const env = await fetchJson('/api/env');
+        console.log('Environment data:', env);
         const leagueEl = document.getElementById('leagueKeyInput');
         const teamEl = document.getElementById('teamKeyInput');
         // Server defaults
@@ -466,6 +486,7 @@
         // Features: read only from /api/features (do not fall back to env)
         try {
           const feat = await fetchJson('/api/features');
+          console.log('Features data:', feat);
           const f = (feat && feat.ok && feat.features) ? feat.features : {};
           const setChk = (id, val) => {
             const el = document.getElementById(id);
@@ -477,20 +498,27 @@
           setChk('kickoffEnabled', f.kickoffEnabled);
           setChk('irAutomationEnabled', f.irAutomationEnabled);
           setChk('waiverAutomationEnabled', f.waiverAutomationEnabled);
+          setChk('pickupsAutomationEnabled', f.pickupsAutomationEnabled);
           setChk('tradesAutomationEnabled', f.tradesAutomationEnabled);
+          setChk('debugYahooEnabled', f.debugYahooEnabled);
+          setChk('applyChanges', f.applyChanges);
         } catch (e) { console.warn('features load failed', e); }
         // Overlay local preferences if present
         const lk = lsGet('leagueKey',''); if (lk && leagueEl) leagueEl.value = lk;
         const tk = lsGet('teamKey',''); if (tk && teamEl) teamEl.value = tk;
       }
       async function refresh() {
+        console.log('refresh() called');
         try {
           setJson('health', await fetchJson('/health'));
-          const cfg = await fetchJson('/api/config'); setJson('config', (cfg && (cfg.config ?? cfg)) || {});
-          if (cfg && cfg.config) fillConfig(cfg.config);
-          loadConfigPrefs();
-          const creds = await fetchJson('/api/creds'); setCredsSummary(creds);
-          setBadges(cfg.config, creds);
+          const creds = await fetchJson('/api/creds'); console.log('Credentials:', creds); setCredsSummary(creds);
+          // Get features data for mode badge
+          try {
+            const features = await fetchJson('/api/features');
+            setBadges(features?.features || {}, creds);
+          } catch (e) {
+            setBadges({}, creds);
+          }
           // Quota badge and summary
           try {
             const q = await fetchJson('/api/quota');
@@ -500,9 +528,9 @@
             if (qs && q && q.ok) {
               qs.textContent = `Remaining Gemini calls today: ${q.remaining}/${q.limit}. Calls are used by lineup optimization, waivers, trade proposals, and incoming trade evaluations, and are conserved on game days for kickoff checks.`;
             }
-          } catch {}
-          const m = await fetchJson('/api/metrics'); setMetricsSummary(m);
-          const act = await fetchJson('/api/activity'); renderActivity(act.events || []);
+          } catch (e) { console.error('Error fetching quota:', e); }
+          const m = await fetchJson('/api/metrics'); console.log('Metrics:', m); setMetricsSummary(m);
+          const act = await fetchJson('/api/activity'); console.log('Activity:', act); renderActivity(act.events || []);
           await refreshGemini();
           document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
           await fillEnvPanel();
@@ -510,33 +538,112 @@
           await refreshRoster();
           await refreshLeagueProfile();
           await refreshTrades();
+          await refreshTransactions();
         } catch (e) {
-          console.error(e);
+          console.error('Error in refresh():', e);
         }
+      }
+      async function refreshTransactions(){
+        try {
+          const r = await fetch('/api/activity');
+          const j = await r.json();
+          const events = (j && j.events) ? j.events : [];
+          const applied = events.filter(ev => ev && ev.type === 'action' && /(_applied|trade_applied|waivers_applied|pickups_applied|lineup_applied|hygiene_applied)/.test(String(ev.action||''))).slice(-20);
+          const tbody = document.getElementById('txSummary'); if (!tbody) return;
+          tbody.innerHTML='';
+          if (applied.length === 0) { tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center">No recent transactions</td></tr>'; return; }
+          for (const ev of applied.reverse()){
+            const tr = document.createElement('tr');
+            const t = document.createElement('td'); t.textContent = new Date(ev.ts || Date.now()).toLocaleString();
+            const ty = document.createElement('td'); ty.textContent = String(ev.action||'');
+            const dt = document.createElement('td'); dt.textContent = JSON.stringify(ev.details || ev.meta || {});
+            tr.append(t, ty, dt); tbody.appendChild(tr);
+          }
+        } catch (e) { console.warn('refreshTransactions failed', e); }
       }
       async function refreshUpcoming(){
         try {
           const r = await fetch('/api/schedule/preview');
           const j = await r.json();
-          const box = document.getElementById('upcomingTasks');
-          if (!box) return;
-          if (!j.ok) { box.textContent = 'Error loading schedule'; return; }
-          const parts = [];
+          const tbody = document.getElementById('upcomingTasks');
+          if (!tbody) return;
+          
+          if (!j.ok) { 
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">Error loading schedule</td></tr>';
+            return; 
+          }
+          
+          const tasks = [];
+          
+          // Add waiver task
           if (j.waiver && j.waiver.enabled) {
-            parts.push('Waivers: next run ' + new Date(j.waiver.nextRunISO).toLocaleString());
-          } else {
-            parts.push('Waivers: disabled');
+            tasks.push({
+              type: 'Waiver Processing',
+              time: new Date(j.waiver.nextRunISO),
+              details: `Weekly waivers (${j.waiver.source || 'default'} schedule)`,
+              sortTime: new Date(j.waiver.nextRunISO).getTime()
+            });
           }
+          
+          // Add kickoff tasks
           if (j.kickoff && j.kickoff.enabled && Array.isArray(j.kickoff.upcoming)) {
-            const next = j.kickoff.upcoming.slice(0, 6).map((e) => new Date(e.runAtISO).toLocaleString() + ` (T-${e.preMinutes}m)`);
-            parts.push('Kickoff checks: ' + (next.join(', ') || 'none'));
-          } else {
-            parts.push('Kickoff checks: disabled');
+            j.kickoff.upcoming.slice(0, 10).forEach(task => {
+              const runTime = new Date(task.runAtISO);
+              const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+              const dayName = dayNames[task.window.dow];
+              const kickoffTime = `${dayName} ${task.window.hh.toString().padStart(2, '0')}:${task.window.mm.toString().padStart(2, '0')}`;
+              
+              tasks.push({
+                type: 'Kickoff Check',
+                time: runTime,
+                details: `T-${task.preMinutes}m before ${kickoffTime}`,
+                sortTime: runTime.getTime()
+              });
+            });
           }
-          box.textContent = parts.join('\n');
-        } catch {
-          const box = document.getElementById('upcomingTasks'); if (box) box.textContent = 'Error';
+          
+          // Sort by earliest time first
+          tasks.sort((a, b) => a.sortTime - b.sortTime);
+          
+          // Generate table rows
+          if (tasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No scheduled tasks</td></tr>';
+          } else {
+            tbody.innerHTML = tasks.map(task => {
+              const timeStr = task.time.toLocaleString();
+              const timeFromNow = getTimeFromNow(task.time);
+              return `
+                <tr>
+                  <td><span class="badge bg-primary">${task.type}</span></td>
+                  <td>
+                    <div class="fw-semibold">${timeStr}</div>
+                    <small class="text-muted">${timeFromNow}</small>
+                  </td>
+                  <td class="small">${task.details}</td>
+                </tr>
+              `;
+            }).join('');
+          }
+        } catch (e) {
+          const tbody = document.getElementById('upcomingTasks'); 
+          if (tbody) tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">Error loading tasks</td></tr>';
         }
+      }
+      
+      function getTimeFromNow(targetDate) {
+        const now = new Date();
+        const diff = targetDate.getTime() - now.getTime();
+        
+        if (diff < 0) return 'Past due';
+        
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        
+        if (days > 0) return `in ${days}d ${hours}h`;
+        if (hours > 0) return `in ${hours}h ${minutes}m`;
+        if (minutes > 0) return `in ${minutes}m`;
+        return 'Very soon';
       }
       async function refreshTrades(){
         try {
@@ -647,11 +754,23 @@
         const defense = [ {name:'Sack', value:1}, {name:'Interception', value:2}, {name:'Fumble Recovery', value:2}, {name:'Touchdown', value:6}, {name:'Safety', value:4, yahooDefault:2}, {name:'Block Kick', value:4, yahooDefault:2}, {name:'Kickoff and Punt Return Touchdowns', value:6}, {name:'Points Allowed 0 points', value:10}, {name:'Points Allowed 1-6 points', value:7}, {name:'Points Allowed 7-13 points', value:5, yahooDefault:4}, {name:'Points Allowed 14-20 points', value:2, yahooDefault:1}, {name:'Points Allowed 21-27 points', value:0}, {name:'Points Allowed 28-34 points', value:-2, yahooDefault:-1}, {name:'Points Allowed 35+ points', value:-5, yahooDefault:-4}, {name:'4th Down Stops', value:2, yahooDefault:0}, {name:'Extra Point Returned', value:2} ];
         return { leagueKey, meta, scoring: { offense, kickers, defense } };
       }
-      function lpEnterEdit(jsonObj){ const view=document.getElementById('leagueProfileView'); const edit=document.getElementById('leagueProfileEdit'); edit.value=JSON.stringify(jsonObj,null,2); view.style.display='none'; edit.style.display='block'; document.getElementById('lpSaveBtn').style.display='inline-block'; document.getElementById('lpCancelBtn').style.display='inline-block'; }
+      function lpEnterEdit(jsonObj){ setLpVisible(true); const view=document.getElementById('leagueProfileView'); const edit=document.getElementById('leagueProfileEdit'); edit.value=JSON.stringify(jsonObj,null,2); view.style.display='none'; edit.style.display='block'; document.getElementById('lpSaveBtn').style.display='inline-block'; document.getElementById('lpCancelBtn').style.display='inline-block'; }
       async function lpSave(){ const edit=document.getElementById('leagueProfileEdit'); const leagueKey=getLeagueKeyForConfig(); try { const obj=JSON.parse(edit.value||'{}'); obj.leagueKey=obj.leagueKey||leagueKey; const r=await fetch('/api/league-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(obj) }); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); alert('League profile saved'); await refreshLeagueProfile(); } catch(e){ alert('Save error: '+(e&&e.message?e.message:String(e))); } }
-      document.getElementById('lpLoadBtn')?.addEventListener('click', refreshLeagueProfile);
+      document.getElementById('lpToggleBtn')?.addEventListener('click', async () => { 
+        const body=document.getElementById('lpBody'); 
+        const vis = body && body.style.display !== 'none'; 
+        if (!vis) {
+          // When showing, also load the data
+          setLpVisible(true);
+          await refreshLeagueProfile();
+        } else {
+          // When hiding, just hide
+          setLpVisible(false);
+        }
+      });
+      document.getElementById('lpLoadBtn')?.addEventListener('click', () => { setLpVisible(true); refreshLeagueProfile(); });
       document.getElementById('lpPrefillBtn')?.addEventListener('click', async () => { const lk=await getLeagueKeyForConfig(); const sample=sampleLeagueProfile(lk||''); lpEnterEdit(sample); });
-      document.getElementById('lpEditBtn')?.addEventListener('click', async () => { const r=await fetchJson('/api/league-config'); const prof=r&&r.profile?r.profile:null; if (prof) lpEnterEdit(prof); else alert('No profile found yet. Use Prefill Sample to create one.'); });
+      document.getElementById('lpEditBtn')?.addEventListener('click', async () => { const r=await fetchJson('/api/league-config'); const prof=r&&r.profile?r.profile:null; if (prof) lpEnterEdit(prof); else { setLpVisible(true); alert('No profile found yet. Use Prefill Sample to create one.'); } });
       document.getElementById('lpSaveBtn')?.addEventListener('click', lpSave);
       document.getElementById('lpCancelBtn')?.addEventListener('click', refreshLeagueProfile);
       async function refreshRoster() {
@@ -718,6 +837,7 @@
           if (!chat) return;
           chat.innerHTML = '';
           const logs = r.logs || [];
+          logs.reverse(); // Display in descending order
           logs.forEach((item) => {
             const wrap = document.createElement('div'); wrap.className='mb-3';
             const ts = document.createElement('div'); ts.className='text-muted small'; ts.textContent = new Date(item.ts).toLocaleString();
@@ -737,55 +857,11 @@
         } catch (e) { console.error('Failed to load gemini logs', e); }
       }
       function escapeHtml(s) { return String(s).replace(/[&<>\"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-      function loadConfigPrefs() {
-        const rt = lsGet('cfg_riskTolerance',''); if (rt) { const el=document.getElementById('riskTolerance'); if (el) el.value = rt; }
-        const te = lsGet('cfg_tradingEnabled',''); if (te) { const el=document.getElementById('tradingEnabled'); if (el) el.checked = te==='1'; }
-        const we = lsGet('cfg_waiverWireEnabled',''); if (we) { const el=document.getElementById('waiverWireEnabled'); if (el) el.checked = we==='1'; }
-        const ac = lsGet('cfg_applyChanges',''); if (ac) { const el=document.getElementById('applyChanges'); if (el) el.checked = ac==='1'; }
-        const mw = lsGet('cfg_maxWaiverClaims',''); if (mw) { const el=document.getElementById('maxWaiverClaims'); if (el) el.value = mw; }
-        const tt = lsGet('cfg_tradeThreshold',''); if (tt) { const el=document.getElementById('tradeThreshold'); if (el) el.value = tt; }
-      }
-      function saveConfigPrefs() {
-        const rt = (document.getElementById('riskTolerance')||{}).value || '';
-        const te = (document.getElementById('tradingEnabled')||{}).checked ? '1' : '0';
-        const we = (document.getElementById('waiverWireEnabled')||{}).checked ? '1' : '0';
-        const ac = (document.getElementById('applyChanges')||{}).checked ? '1' : '0';
-        const mw = (document.getElementById('maxWaiverClaims')||{}).value || '';
-        const tt = (document.getElementById('tradeThreshold')||{}).value || '';
-        lsSet('cfg_riskTolerance', rt);
-        lsSet('cfg_tradingEnabled', te);
-        lsSet('cfg_waiverWireEnabled', we);
-        lsSet('cfg_applyChanges', ac);
-        lsSet('cfg_maxWaiverClaims', mw);
-        lsSet('cfg_tradeThreshold', tt);
-      }
-      function fillConfig(c) {
-        document.getElementById('riskTolerance').value = c.riskTolerance;
-        document.getElementById('tradingEnabled').checked = !!c.tradingEnabled;
-        document.getElementById('waiverWireEnabled').checked = !!c.waiverWireEnabled;
-        document.getElementById('applyChanges').checked = !!c.applyChanges;
-        document.getElementById('maxWaiverClaims').value = c.maxWaiverClaims;
-        document.getElementById('tradeThreshold').value = c.tradeThreshold;
-      }
-      document.getElementById('cfgForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const body = {
-          bot: {
-            riskTolerance: document.getElementById('riskTolerance').value,
-            tradingEnabled: document.getElementById('tradingEnabled').checked,
-            waiverWireEnabled: document.getElementById('waiverWireEnabled').checked,
-            applyChanges: document.getElementById('applyChanges').checked,
-            maxWaiverClaims: parseInt(document.getElementById('maxWaiverClaims').value, 10),
-            tradeThreshold: parseFloat(document.getElementById('tradeThreshold').value),
-          }
-        };
-        const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const j = await r.json();
-        alert(j.ok ? 'Config saved' : 'Save failed: ' + j.error);
-        saveConfigPrefs();
-        refresh();
-      });
-      document.getElementById('resetCfgBtn').addEventListener('click', async () => { await fetch('/api/config'); refresh(); });
+      
+      
+      
+      
+      
       document.getElementById('yahooForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = {
@@ -985,12 +1061,28 @@
       });
       document.getElementById('refreshTradeBlockBtn').addEventListener('click', () => refreshTradeBlock(true));
       // Removed manual save; trade block is computed automatically
+      // Add real-time mode badge updates when applyChanges toggle changes
+      document.getElementById('applyChanges').addEventListener('change', function() {
+        const isLive = this.checked;
+        const modeEl = document.getElementById('modeBadge');
+        if (isLive) {
+          modeEl.className = 'badge bg-danger';
+          modeEl.textContent = 'Mode: Live Writes';
+        } else {
+          modeEl.className = 'badge bg-secondary';
+          modeEl.textContent = 'Mode: Dry Run';
+        }
+      });
+
       document.getElementById('saveFeaturesBtn').addEventListener('click', async () => {
         const body = {
           kickoffEnabled: document.getElementById('kickoffEnabled').checked,
           irAutomationEnabled: document.getElementById('irAutomationEnabled').checked,
           waiverAutomationEnabled: document.getElementById('waiverAutomationEnabled').checked,
+          pickupsAutomationEnabled: document.getElementById('pickupsAutomationEnabled').checked,
           tradesAutomationEnabled: document.getElementById('tradesAutomationEnabled').checked,
+          debugYahooEnabled: document.getElementById('debugYahooEnabled').checked,
+          applyChanges: document.getElementById('applyChanges').checked,
         };
         const r = await fetch('/api/features', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const j = await r.json();
@@ -999,6 +1091,16 @@
       });
       // Initial populate only
       refresh();
+      // Pickups handler
+      document.getElementById('runPickupsNowBtn').addEventListener('click', async () => {
+        const env = await fetchJson('/api/env');
+        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || env.leagueKey || '';
+        const teamKey = (document.getElementById('teamKeyInput') || {}).value || env.teamKey || '';
+        const body = { leagueKey, teamKey, forceApply: true, max: 1, forceFull: true };
+        const r = await fetch('/api/pickups/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        alert(j.ok ? ('Pickups executed: ' + JSON.stringify(j.applied)) : ('Pickups failed: ' + j.error));
+      });
       // Daily schedule form removed — scheduling handled by smart automation
     </script>
     <!-- Removed legacy client bundle include to avoid state conflicts with inline dashboard script -->

@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  yahoo-fantasy-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yahoo-fantasy-agent:latest
+    container_name: yahoo-fantasy-agent
+    env_file:
+      - .env
+    environment:
+      ENABLE_HTTPS: "1"
+      HTTPS_PORT: "3000"
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./.secure:/app/.secure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health" ]
+      interval: 20s
+      timeout: 5s
+      retries: 6

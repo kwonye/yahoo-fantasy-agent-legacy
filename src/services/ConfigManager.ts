@@ -2,19 +2,19 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import { BotConfig, ApiCredentials, YahooCredentials, GeminiCredentials, RiskLevel, AuthToken, LeagueProfile, AppSettings } from '../models';
+import { ApiCredentials, YahooCredentials, GeminiCredentials, RiskLevel, AuthToken, LeagueProfile, AppSettings } from '../models';
 import { SecureStore } from './SecureStore';
 
 export interface ConfigManagerOptions {
   configDir?: string; // where to store encrypted credentials
   encryptionKey?: string; // overrides env var
-  preferencesPath?: string; // path to store bot config overrides (json)
+  
 }
 
 export class ConfigManager {
   private readonly configDir: string;
   private readonly store: SecureStore | null;
-  private readonly preferencesPath: string;
+  
   private readonly leaguesDir: string;
   private readonly appSettingsPath: string;
 
@@ -24,44 +24,24 @@ export class ConfigManager {
     this.configDir = options.configDir ?? process.env.CONFIG_DIR ?? defaultDir;
     const encryptionKey = options.encryptionKey ?? process.env.CONFIG_ENCRYPTION_KEY ?? '';
     this.store = encryptionKey ? new SecureStore({ baseDir: this.configDir, encryptionKey }) : null;
-    const defaultPrefsPath = path.join(process.cwd(), 'config', 'bot-config.json');
-    this.preferencesPath = options.preferencesPath ?? process.env.BOT_CONFIG_PATH ?? defaultPrefsPath;
+    
     this.leaguesDir = path.join(process.cwd(), 'config', 'leagues');
     this.appSettingsPath = path.join(process.cwd(), 'config', 'app-settings.json');
   }
 
   // --------- Public API ---------
-  getBotConfig(): BotConfig {
-    // Source exclusively from app-settings; migrate legacy bot-config.json if present.
-    let app = this.loadAppSettings();
-    let bot = (app as any).bot as Partial<BotConfig> | undefined;
-    if (!bot || Object.keys(bot).length === 0) {
-      const legacy = this.loadPreferences();
-      if (legacy && Object.keys(legacy).length > 0) {
-        bot = legacy as Partial<BotConfig>;
-        // Persist migration into app-settings
-        app = this.saveAppSettings({ ...app, bot: this.applyDefaults(bot) });
-      }
-    }
-    const withDefaults = this.applyDefaults(bot || {});
-    this.validateBotConfig(withDefaults);
-    // Ensure app-settings always carries bot config
-    if (!(app as any).bot) {
-      this.saveAppSettings({ ...app, bot: withDefaults });
-    }
-    return withDefaults;
-  }
+  
 
   getEnvCredentials(): ApiCredentials {
-    // Non-persistent, direct from env (useful as bootstrap)
+    // Non-persistent, direct from env (Yahoo only; Gemini is saved via dashboard)
     const yahoo: YahooCredentials = {
       clientId: this.required(process.env.YAHOO_CLIENT_ID, 'YAHOO_CLIENT_ID'),
       clientSecret: this.required(process.env.YAHOO_CLIENT_SECRET, 'YAHOO_CLIENT_SECRET'),
-      accessToken: process.env.YAHOO_ACCESS_TOKEN,
-      refreshToken: process.env.YAHOO_REFRESH_TOKEN,
+      accessToken: undefined,
+      refreshToken: undefined,
     };
     const gemini: GeminiCredentials = {
-      apiKey: this.required(process.env.GEMINI_API_KEY, 'GEMINI_API_KEY'),
+      apiKey: '',
     };
     return { yahoo, gemini };
   }
@@ -117,28 +97,9 @@ export class ConfigManager {
   }
 
   // --------- Helpers ---------
-  savePreferences(partial: Partial<BotConfig>): BotConfig {
-    // Persist bot config into app-settings exclusively
-    const app = this.loadAppSettings();
-    const current = ((app as any).bot || {}) as Partial<BotConfig>;
-    const next = { ...current, ...partial } as Partial<BotConfig>;
-    const validated = this.applyDefaults(next);
-    this.validateBotConfig(validated);
-    this.saveAppSettings({ ...app, bot: validated });
-    return validated;
-  }
+  
 
-  loadPreferences(): Partial<BotConfig> {
-    // Legacy loader for bot-config.json; used only for one-time migration
-    try {
-      if (!fs.existsSync(this.preferencesPath)) return {};
-      const raw = fs.readFileSync(this.preferencesPath, 'utf8');
-      const obj = JSON.parse(raw);
-      return obj as Partial<BotConfig>;
-    } catch {
-      return {};
-    }
-  }
+  
 
   // --------- App settings (UI-managed global state) ---------
   loadAppSettings(): AppSettings {
@@ -159,8 +120,11 @@ export class ConfigManager {
       kickoffEnabled: false,
       irAutomationEnabled: true,
       waiverAutomationEnabled: true,
+      pickupsAutomationEnabled: false,
       tradesAutomationEnabled: true,
-    } as any);
+      debugYahooEnabled: false,
+      applyChanges: false,
+    });
     try { this.saveAppSettings(seeded); } catch {}
     return seeded;
   }
@@ -184,13 +148,15 @@ export class ConfigManager {
       kickoffEnabled: !!p.kickoffEnabled,
       irAutomationEnabled: p.irAutomationEnabled !== undefined ? !!p.irAutomationEnabled : true,
       waiverAutomationEnabled: p.waiverAutomationEnabled !== undefined ? !!p.waiverAutomationEnabled : true,
+      pickupsAutomationEnabled: p.pickupsAutomationEnabled !== undefined ? !!p.pickupsAutomationEnabled : false,
       tradesAutomationEnabled: p.tradesAutomationEnabled !== undefined ? !!p.tradesAutomationEnabled : true,
+      debugYahooEnabled: p.debugYahooEnabled !== undefined ? !!p.debugYahooEnabled : false,
+      applyChanges: p.applyChanges !== undefined ? !!p.applyChanges : false,
       waiverDay: p.waiverDay !== undefined ? coerce(p.waiverDay, 2) : undefined,
       waiverHour: p.waiverHour !== undefined ? coerce(p.waiverHour, 7) : undefined,
       waiverMinute: p.waiverMinute !== undefined ? coerce(p.waiverMinute, 0) : undefined,
     };
-    // Preserve existing bot config if present; otherwise leave undefined to allow defaults
-    if ((p as any).bot) (base as any).bot = (p as any).bot as any;
+    
     return base;
   }
 
@@ -324,82 +290,14 @@ export class ConfigManager {
     return Number.isFinite(n) ? n : def;
   }
 
-  private applyDefaults(cfg: Partial<BotConfig>): BotConfig {
-    const defaults: BotConfig = {
-      riskTolerance: RiskLevel.MODERATE,
-      tradingEnabled: true,
-      waiverWireEnabled: true,
-      maxWaiverClaims: 3,
-      tradeThreshold: 0,
-      applyChanges: false,
-      positionPriorities: {},
-      tradeNeeds: [],
-      tradeSurplus: [],
-      neverDrop: [],
-    };
-    return {
-      riskTolerance: cfg.riskTolerance ?? defaults.riskTolerance,
-      tradingEnabled: cfg.tradingEnabled ?? defaults.tradingEnabled,
-      waiverWireEnabled: cfg.waiverWireEnabled ?? defaults.waiverWireEnabled,
-      maxWaiverClaims: cfg.maxWaiverClaims ?? defaults.maxWaiverClaims,
-      tradeThreshold: cfg.tradeThreshold ?? defaults.tradeThreshold,
-      applyChanges: cfg.applyChanges ?? defaults.applyChanges,
-      positionPriorities: (cfg as any).positionPriorities ?? defaults.positionPriorities,
-      tradeNeeds: Array.isArray(cfg.tradeNeeds) ? cfg.tradeNeeds : defaults.tradeNeeds,
-      tradeSurplus: Array.isArray(cfg.tradeSurplus) ? cfg.tradeSurplus : defaults.tradeSurplus,
-      neverDrop: Array.isArray((cfg as any).neverDrop) ? (cfg as any).neverDrop : defaults.neverDrop,
-    };
-  }
+  
 
-  private validateBotConfig(cfg: BotConfig) {
-    if (!Object.values(RiskLevel).includes(cfg.riskTolerance)) {
-      throw new Error('Invalid riskTolerance');
-    }
-    if (typeof cfg.maxWaiverClaims !== 'number' || cfg.maxWaiverClaims < 0) {
-      throw new Error('Invalid maxWaiverClaims');
-    }
-    if (typeof cfg.tradeThreshold !== 'number' || cfg.tradeThreshold < 0) {
-      throw new Error('Invalid tradeThreshold');
-    }
-    // position priorities are derived live by Gemini; none to validate
-    if (cfg.positionPriorities && typeof cfg.positionPriorities !== 'object') {
-      throw new Error('Invalid positionPriorities');
-    }
-    if (!Array.isArray(cfg.tradeNeeds) || !cfg.tradeNeeds.every((s) => typeof s === 'string')) {
-      throw new Error('Invalid tradeNeeds');
-    }
-    if (!Array.isArray(cfg.tradeSurplus) || !cfg.tradeSurplus.every((s) => typeof s === 'string')) {
-      throw new Error('Invalid tradeSurplus');
-    }
-    if (cfg.neverDrop && (!Array.isArray(cfg.neverDrop) || !cfg.neverDrop.every((s) => typeof s === 'string'))) {
-      throw new Error('Invalid neverDrop');
-    }
-  }
+  
 
   private required(val: string | undefined, name: string): string {
     if (!val) throw new Error(`Missing required environment variable: ${name}`);
     return val;
   }
 
-  private parsePositionPriorities(val?: string): Record<string, number> | undefined {
-    if (!val) return undefined;
-    try {
-      // Support JSON or shorthand QB:4,RB:5
-      const s = val.trim();
-      if (!s) return undefined;
-      if (s.startsWith('{')) {
-        const obj = JSON.parse(s);
-        return obj && typeof obj === 'object' ? (obj as Record<string, number>) : undefined;
-      }
-      const out: Record<string, number> = {};
-      for (const part of s.split(',').map((p) => p.trim()).filter(Boolean)) {
-        const [k, v] = part.split(':').map((x) => x.trim());
-        const num = Number(v);
-        if (k && Number.isFinite(num)) out[k] = num;
-      }
-      return out;
-    } catch {
-      return undefined;
-    }
-  }
+  // position priorities and static needs/surplus removed; Gemini infers these live
 }

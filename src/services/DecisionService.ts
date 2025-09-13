@@ -12,12 +12,11 @@ export interface DecisionServiceOptions {
 
 export class DecisionService {
   private readonly gemini: GeminiClient;
-  private readonly config: BotConfig;
   private readonly minConfidence: number;
 
-  constructor(gemini: GeminiClient, config: BotConfig, opts: DecisionServiceOptions = {}) {
+  constructor(gemini: GeminiClient, opts: DecisionServiceOptions = {}) {
     this.gemini = gemini;
-    this.config = config;
+    
     this.minConfidence = opts.minConfidence ?? 0.5;
   }
 
@@ -26,7 +25,7 @@ export class DecisionService {
     leagueSettings: LeagueSettings,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<LineupDecision> {
-    const raw = await this.gemini.optimizeLineup(roster, leagueSettings, this.config, context);
+    const raw = await this.gemini.optimizeLineup(roster, leagueSettings, { applyChanges: true }, context);
     // Validate minimal fields and confidence
     const confidence = clamp(raw.confidence ?? 0, 0, 1);
     const projectedPoints = typeof raw.projectedPoints === 'number' ? raw.projectedPoints : 0;
@@ -44,13 +43,11 @@ export class DecisionService {
     availablePlayers: Player[],
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<WaiverDecision> {
-    if (!this.config.waiverWireEnabled) {
-      return { claims: [], reasoning: 'Waiver wire disabled by configuration', confidence: 1, expectedValue: 0 };
-    }
+    
     const raw = await this.gemini.evaluateWaiver(
       availablePlayers,
-      this.config,
-      this.config.maxWaiverClaims,
+      { applyChanges: true },
+      100,
       context
     );
 
@@ -62,16 +59,11 @@ export class DecisionService {
       const lp: any = (context as any).leagueProfile;
       const maxWeek: number | undefined = Number.isFinite(Number(lp?.meta?.maxAcquisitionsWeek)) ? Number(lp.meta.maxAcquisitionsWeek) : undefined;
       if (Number.isFinite(maxWeek as any)) {
-        const cap = Math.max(0, Math.min(this.config.maxWaiverClaims, Number(maxWeek)));
+        const cap = Math.max(0, Math.min(100, Number(maxWeek)));
         claims = claims.slice(0, cap);
       }
     } catch {}
 
-    // Filter out claims that drop never-drop players, if configured
-    const neverDrop = Array.isArray((this.config as any).neverDrop) ? (this.config as any).neverDrop as string[] : [];
-    if (neverDrop.length > 0) {
-      claims = claims.filter((c) => !c.dropPlayerId || !neverDrop.includes(String(c.dropPlayerId)));
-    }
     // If league disallows injured adds, filter out claims adding clearly injured/IR players
     try {
       const lp: any = (context as any).leagueProfile;
@@ -93,7 +85,7 @@ export class DecisionService {
     claims = claims
       .map((c) => ({ ...c, priority: toNumber(c.priority, 0) }))
       .sort((a, b) => a.priority - b.priority)
-      .slice(0, Math.max(0, this.config.maxWaiverClaims));
+      .slice(0, Math.max(0, 100));
 
     // Cap any provided bidAmount to available FAAB (if provided in context)
     const faabRemain = toNumber((context as any).faabBudgetRemaining, NaN);
@@ -113,19 +105,41 @@ export class DecisionService {
     theirRoster: Player[],
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<TradeDecision> {
-    if (!this.config.tradingEnabled) {
-      return { shouldTrade: false, reasoning: 'Trading disabled by configuration', confidence: 1, expectedValue: 0 };
-    }
-    const raw = await this.gemini.evaluateTrade(myRoster, theirRoster, this.config, context);
+
+    const raw = await this.gemini.evaluateTrade(myRoster, theirRoster, { applyChanges: true }, context);
     const confidence = clamp(raw.confidence ?? 0, 0, 1);
     const expectedValue = toNumber(raw.expectedValue, 0);
 
     // Apply trade threshold gating
-    const meetsThreshold = expectedValue >= (this.config.tradeThreshold ?? 0);
+    const meetsThreshold = true;
     const shouldTrade = Boolean(raw.shouldTrade) && meetsThreshold && confidence >= this.minConfidence;
 
+    const primary = raw.proposal ?? (Array.isArray((raw as any).proposals) ? (raw as any).proposals[0] : undefined);
     return {
-      proposal: raw.proposal,
+      proposal: primary,
+      proposals: (raw as any).proposals,
+      shouldTrade,
+      reasoning: raw.reasoning ?? 'No reasoning provided',
+      confidence,
+      expectedValue,
+    };
+  }
+
+  async decideTradeMulti(
+    myRoster: Player[],
+    opponents: Array<{ teamKey: string; teamName?: string; roster: Player[] }>,
+    context: Omit<AnalysisContext, 'userPreferences'>
+  ): Promise<TradeDecision> {
+
+    const raw = await this.gemini.evaluateTradesMulti(myRoster, opponents, { applyChanges: true }, context);
+    const confidence = clamp(raw.confidence ?? 0, 0, 1);
+    const expectedValue = toNumber(raw.expectedValue, 0);
+    const meetsThreshold = true;
+    const primary = raw.proposal ?? (Array.isArray((raw as any).proposals) ? (raw as any).proposals[0] : undefined);
+    const shouldTrade = Boolean(raw.shouldTrade) && meetsThreshold && confidence >= this.minConfidence && !!primary;
+    return {
+      proposal: primary,
+      proposals: (raw as any).proposals,
       shouldTrade,
       reasoning: raw.reasoning ?? 'No reasoning provided',
       confidence,

@@ -55,8 +55,23 @@ export class YahooApiService {
   private async postXml(pathname: string, xml: string): Promise<any> {
     const headers = { ...(await this.authHeaders()), 'Content-Type': 'application/xml' };
     const url = `${this.baseUrl}${pathname}`;
-    const { data } = await this.http.post(url, xml, { headers });
-    return data;
+    try {
+      const { data } = await this.http.post(url, xml, { headers });
+      return data;
+    } catch (e: any) {
+      // Log error payload for diagnostics
+      try {
+        this.debugDump('last_write_error.json', {
+          url,
+          status: e?.response?.status,
+          statusText: e?.response?.statusText,
+          data: e?.response?.data || null,
+          message: e?.message,
+          xml,
+        });
+      } catch {}
+      throw e;
+    }
   }
 
   async updateRosterXml(teamKey: string, xml: string): Promise<{ success: boolean }> {
@@ -73,9 +88,9 @@ export class YahooApiService {
   }
 
   async proposeTradeXml(leagueKey: string, xml: string): Promise<{ success: boolean; id?: string }> {
-    const path = `/league/${encodeURIComponent(leagueKey)}/trades`;
+    const path = `/league/${encodeURIComponent(leagueKey)}/transactions`;
     const data = await this.postXml(path, xml);
-    return { success: true, id: data?.trade?.id };
+    return { success: true, id: data?.transaction?.id };
   }
 
   async getLeague(leagueKey: string): Promise<League> {
@@ -83,6 +98,45 @@ export class YahooApiService {
     const data = await this.getJson(url);
     this.debugDump('last_league_raw.json', data);
     return this.mapLeague(data, leagueKey);
+  }
+
+  // Fetch all teams for a league with keys and (optional) names
+  async getLeagueTeams(leagueKey: string): Promise<Array<{ key: string; name?: string }>> {
+    const url = `${this.baseUrl}/league/${encodeURIComponent(leagueKey)}/teams?format=json`;
+    const data = await this.getJson(url);
+    this.debugDump('last_league_teams_raw.json', data);
+    // Attempt to parse Yahoo fantasy_content structure
+    const out: Array<{ key: string; name?: string }> = [];
+    try {
+      const fc = (data as any)?.fantasy_content;
+      const leagueArr = fc?.league;
+      if (leagueArr) {
+        const teamsNode = (leagueArr.find((x: any) => x?.teams) || {}).teams;
+        if (teamsNode) {
+          // Yahoo API returns teams as an object with numeric keys (0, 1, ...) and a 'count' property
+          for (let i = 0; i < teamsNode.count; i++) {
+            const entry = teamsNode[String(i)];
+            const node = entry?.team?.[0]?.[0];
+            if (!node) continue;
+            // node is often an array of objects with fields like team_key, name, etc.
+            const flat = Array.isArray(node)
+              ? node.reduce((acc: any, part: any) => ({ ...acc, ...part }), {})
+              : node;
+            const key = flat.team_key || flat.teamKey || flat.key;
+            const name = flat.name || flat.team_name || undefined;
+            if (key) out.push({ key: String(key), name: name ? String(name) : undefined });
+          }
+        }
+      }
+    } catch {}
+    // Fallback for simplified test shapes
+    if (out.length === 0 && Array.isArray((data as any)?.teams)) {
+      for (const t of (data as any).teams) {
+        if (t?.key) out.push({ key: String(t.key), name: t.name });
+      }
+    }
+    this.debugDump('last_league_teams_parsed.json', out);
+    return out;
   }
 
   async getTeamRoster(teamKey: string, week?: number): Promise<Player[]> {
@@ -114,7 +168,16 @@ export class YahooApiService {
   }
 
   private debugDump(filename: string, data: any) {
-    if (!process.env.DEBUG_YAHOO) return;
+    // Debug controlled by dashboard setting
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { ConfigManager } = require('./ConfigManager');
+      const cm = new ConfigManager();
+      const app = cm.loadAppSettings();
+      if (!app?.debugYahooEnabled) return;
+    } catch {
+      return;
+    }
     try {
       // Lazy import to avoid top-level fs in browser builds
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -177,6 +240,25 @@ export class YahooApiService {
       // Yahoo-style selectors
       `${base}/players;status=W;count=${count}?format=json`,
       `${base}/players;status=FA;count=${count}?format=json`,
+    ];
+    for (const url of urls) {
+      try {
+        const data = await this.getJson(url);
+        const parsed = this.extractLeaguePlayers(data);
+        if (parsed.length > 0) return parsed;
+      } catch {
+        // continue
+      }
+    }
+    return [];
+  }
+
+  // Return only immediate free agents (not players on waivers)
+  async getFreeAgents(leagueKey: string, count: number = 25): Promise<Player[]> {
+    const base = `${this.baseUrl}/league/${encodeURIComponent(leagueKey)}`;
+    const urls = [
+      `${base}/players;status=FA;count=${count}?format=json`,
+      `${base}/players?status=free_agents&format=json`,
     ];
     for (const url of urls) {
       try {

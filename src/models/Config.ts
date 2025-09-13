@@ -1,17 +1,7 @@
 import { RiskLevel } from './Common';
 
 export interface BotConfig {
-  riskTolerance: RiskLevel;
-  tradingEnabled: boolean;
-  waiverWireEnabled: boolean;
-  maxWaiverClaims: number;
-  tradeThreshold: number;
   applyChanges: boolean; // when false, operate in dry-run mode and do not write to Yahoo
-  // Legacy hinting; Gemini infers priorities at runtime (kept for compatibility)
-  positionPriorities: Record<string, number>;
-  tradeNeeds?: string[];
-  tradeSurplus?: string[];
-  neverDrop?: string[]; // player IDs that should never be dropped
 }
 
 // UI-managed runtime settings
@@ -25,13 +15,15 @@ export interface AppSettings {
   kickoffEnabled: boolean;
   irAutomationEnabled: boolean;
   waiverAutomationEnabled: boolean;
+  pickupsAutomationEnabled: boolean;
   tradesAutomationEnabled: boolean;
+  debugYahooEnabled: boolean;
+  // Apply changes flag (when false, operate in dry-run mode)
+  applyChanges: boolean;
   // Optional waiver scheduler overrides
   waiverDay?: number;   // 0=Sun ... 6=Sat
   waiverHour?: number;  // 0-23
   waiverMinute?: number;// 0-59
-  // Consolidated bot configuration (migrated from bot-config.json and env)
-  bot?: BotConfig;
 }
 
 export interface ApiCredentials {
@@ -48,6 +40,7 @@ export interface YahooCredentials {
 
 export interface GeminiCredentials {
   apiKey: string;
+  model?: string;
 }
 
 export interface AuthToken {

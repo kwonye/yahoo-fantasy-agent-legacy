@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { ConfigManager } from '../../src/services';
-import { RiskLevel } from '../../src/models';
+
 
 const withTempDir = (fn: (dir: string) => void) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cfgmgr-'));
@@ -24,30 +24,9 @@ describe('ConfigManager', () => {
     process.env = { ...originalEnv };
   });
 
-  it('applies defaults and parses environment variables', () => {
-    process.env.BOT_RISK_TOLERANCE = 'AGGRESSIVE';
-    process.env.BOT_POSITION_PRIORITIES = 'QB:4,RB:5,WR:5,TE:2,K:1,DEF:1';
-    process.env.BOT_TRADING_ENABLED = 'false';
-    process.env.BOT_WAIVER_WIRE_ENABLED = 'true';
-    process.env.BOT_MAX_WAIVER_CLAIMS = '5';
-    process.env.BOT_TRADE_THRESHOLD = '1.5';
+  
 
-    const mgr = new ConfigManager();
-    const cfg = mgr.getBotConfig();
-    expect(cfg.riskTolerance).toBe(RiskLevel.AGGRESSIVE);
-    expect(cfg.positionPriorities.QB).toBe(4);
-    expect(cfg.tradingEnabled).toBe(false);
-    expect(cfg.waiverWireEnabled).toBe(true);
-    expect(cfg.maxWaiverClaims).toBe(5);
-    expect(cfg.tradeThreshold).toBe(1.5);
-  });
-
-  it('validates configuration values', () => {
-    process.env.BOT_RISK_TOLERANCE = 'INVALID';
-    process.env.BOT_MAX_WAIVER_CLAIMS = '-1';
-    const mgr = new ConfigManager();
-    expect(() => mgr.getBotConfig()).toThrow();
-  });
+  
 
   it('saves and loads encrypted credentials', () => {
     withTempDir((dir) => {
