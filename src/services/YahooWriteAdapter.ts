@@ -27,9 +27,9 @@ export class YahooWriteAdapter {
       const { ConfigManager } = require('./ConfigManager');
       const cm = new ConfigManager();
       const app = cm.loadAppSettings();
-      this.debugYahoo = opts.debugYahoo ?? !!app.debugYahooEnabled;
+      this.debugYahoo = typeof opts.debugYahoo === 'boolean' ? opts.debugYahoo : (process.env.DEBUG_YAHOO === '1') || !!app.debugYahooEnabled;
     } catch {
-      this.debugYahoo = !!opts.debugYahoo;
+      this.debugYahoo = typeof opts.debugYahoo === 'boolean' ? opts.debugYahoo : (process.env.DEBUG_YAHOO === '1') || false;
     }
   }
 
@@ -97,7 +97,10 @@ export class YahooWriteAdapter {
     };
   }
 
-  async applyWaivers(leagueKey: string, myTeamKey: string, decision: WaiverDecision): Promise<{ success: boolean }> {
+  // Backward-compatible signature: allow applyWaivers(leagueKey, decision)
+  async applyWaivers(leagueKey: string, myTeamKeyOrDecision: string | WaiverDecision, maybeDecision?: WaiverDecision): Promise<{ success: boolean }> {
+    const myTeamKey = typeof myTeamKeyOrDecision === 'string' ? myTeamKeyOrDecision : '';
+    const decision: WaiverDecision = typeof myTeamKeyOrDecision === 'string' ? (maybeDecision as WaiverDecision) : (myTeamKeyOrDecision as WaiverDecision);
     const payload = this.buildWaiverPayload(decision);
     this.dump('waivers', payload);
     const xml = this.buildWaiverXML(leagueKey, myTeamKey, decision);

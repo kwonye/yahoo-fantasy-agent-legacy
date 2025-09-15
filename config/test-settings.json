@@ -1,0 +1,9 @@
+{
+  "YAHOO_CLIENT_ID": "test-yahoo-id",
+  "YAHOO_CLIENT_SECRET": "test-yahoo-secret",
+  "GEMINI_API_KEY": "test-gemini-key",
+  "GEMINI_MODEL": "gemini-2.5-flash",
+  "LEAGUE_KEY": "nfl.l.1",
+  "TEAM_KEY": "nfl.l.1.t.1",
+  "PORT": "3000"
+}

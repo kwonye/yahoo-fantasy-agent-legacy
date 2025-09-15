@@ -41,8 +41,15 @@ export class BotController {
     let decisions: DecisionService | null = null;
     try {
       const cm = new ConfigManager();
-      const g = cm.loadGeminiCredentials();
-      if (g && g.apiKey) {
+      let apiKey: string | undefined = undefined;
+      try {
+        const g = cm.loadGeminiCredentials();
+        apiKey = g?.apiKey;
+      } catch {
+        // Fall back to environment variable if SecureStore not configured
+        apiKey = process.env.GEMINI_API_KEY;
+      }
+      if (apiKey) {
         const gemini = new GeminiClient();
         decisions = new DecisionService(gemini);
       } else {
@@ -66,7 +73,8 @@ export class BotController {
       // Game-day awareness: on Thu/Sun/Mon, rely on kickoff checks for lineup to save budget
       const dow = new Date().getDay(); // 0 Sun ... 6 Sat
       const isGameDay = (d: number) => d === 0 || d === 1 || d === 4; // Sun, Mon, Thu
-      if (!isGameDay(dow)) {
+      const deferToKickoff = !!app.kickoffEnabled && isGameDay(dow);
+      if (!deferToKickoff) {
         if (this.quota.getRemaining() > 0) await this.optimizeLineup();
         else this.audit.recordAction('lineup_skipped', { reason: 'quota_exhausted' });
       } else {

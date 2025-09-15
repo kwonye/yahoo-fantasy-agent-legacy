@@ -26,7 +26,9 @@ export class ConfigManager {
     this.store = encryptionKey ? new SecureStore({ baseDir: this.configDir, encryptionKey }) : null;
     
     this.leaguesDir = path.join(process.cwd(), 'config', 'leagues');
-    this.appSettingsPath = path.join(process.cwd(), 'config', 'app-settings.json');
+    this.appSettingsPath = options && (options as any).appSettingsPath
+      ? (options as any).appSettingsPath
+      : (process.env.BOT_CONFIG_PATH || path.join(process.cwd(), 'config', 'app-settings.json'));
   }
 
   // --------- Public API ---------
@@ -41,7 +43,7 @@ export class ConfigManager {
       refreshToken: undefined,
     };
     const gemini: GeminiCredentials = {
-      apiKey: '',
+      apiKey: process.env.GEMINI_API_KEY || '',
     };
     return { yahoo, gemini };
   }
@@ -106,8 +108,9 @@ export class ConfigManager {
     try {
       if (fs.existsSync(this.appSettingsPath)) {
         const raw = fs.readFileSync(this.appSettingsPath, 'utf8');
-        const obj = JSON.parse(raw) as AppSettings;
-        return this.applyAppDefaults(obj);
+        const obj = JSON.parse(raw) as any;
+        const base = this.applyAppDefaults(obj || {});
+        return { ...(obj || {}), ...base } as AppSettings;
       }
     } catch {}
     // Seed with neutral defaults (no environment dependency)
@@ -131,11 +134,12 @@ export class ConfigManager {
   }
 
   saveAppSettings(settings: AppSettings): AppSettings {
-    const validated = this.applyAppDefaults(settings);
+    const validated = this.applyAppDefaults(settings as any);
+    const toWrite = { ...(settings as any || {}), ...validated };
     const dir = path.dirname(this.appSettingsPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.appSettingsPath, JSON.stringify(validated, null, 2), 'utf8');
-    return validated;
+    fs.writeFileSync(this.appSettingsPath, JSON.stringify(toWrite, null, 2), 'utf8');
+    return toWrite as AppSettings;
   }
 
   private applyAppDefaults(p: Partial<AppSettings>): AppSettings {

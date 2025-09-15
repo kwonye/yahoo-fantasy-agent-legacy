@@ -129,13 +129,19 @@ export class YahooOAuthClient {
   }
 
   private getCreds(): YahooCredentials {
-    // Only use credentials from secure store (set via dashboard)
+    // Prefer secure store, but fall back to environment variables for tests and env-configured setups
     const loadStore = (): YahooCredentials | null => {
       try { return this.config.loadYahooCredentials(); } catch { return null; }
     };
     const fromStore = loadStore();
-
     if (fromStore?.clientId && fromStore?.clientSecret) return fromStore;
+
+    // Check environment vars
+    const envClientId = process.env.YAHOO_CLIENT_ID;
+    const envClientSecret = process.env.YAHOO_CLIENT_SECRET;
+    if (envClientId && envClientSecret) {
+      return { clientId: envClientId, clientSecret: envClientSecret, accessToken: process.env.YAHOO_ACCESS_TOKEN, refreshToken: process.env.YAHOO_REFRESH_TOKEN };
+    }
 
     throw new Error('Yahoo client credentials are not configured');
   }
