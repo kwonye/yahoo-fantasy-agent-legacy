@@ -1784,3 +1784,6 @@ app.get('/app.js', (_req, res) => {
     res.status(500).send('// error serving client bundle');
   }
 });
+
+// Export the express app for serverless platforms (Vercel)
+export { app };
