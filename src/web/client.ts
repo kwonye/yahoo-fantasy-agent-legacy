@@ -1,6 +1,15 @@
 // Client-side dashboard logic (TypeScript)
 type AnyEl = HTMLElement & { value?: string; checked?: boolean };
 
+// Try to load Vercel Analytics if available; non-fatal if missing.
+(async function loadVercelAnalytics(){
+  try {
+    await import('@vercel/analytics');
+  } catch (e) {
+    // Analytics optional — ignore load failures
+  }
+})();
+
 const $ = (id: string) => document.getElementById(id) as AnyEl | null;
 
 async function fetchJson<T = any>(url: string): Promise<T> {
