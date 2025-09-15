@@ -4,10 +4,10 @@
   "description": "Automated fantasy football bot using Yahoo Fantasy Sports API and Gemini AI",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
-    "vercel-build": "npm run build",
-    "start": "node dist/index.js",
-    "dev": "nodemon --signal SIGTERM --ext ts,json --watch src --ignore logs --exec \"ts-node src/index.ts\"",
+    "build": "next build && tsc",
+    "vercel-build": "next build && npm run build",
+    "start": "next start",
+    "dev": "next dev",
     "bot": "ts-node src/tools/runBot.ts once",
     "bot:schedule": "ts-node src/tools/runBot.ts schedule",
     "demo": "ts-node src/tools/demoYahoo.ts",
@@ -51,9 +51,14 @@
     "supertest": "^6.3.4",
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0"
   },
   "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "@vercel/analytics": "^1.5.0",
     "axios": "^1.6.0",
     "dotenv": "^16.3.0",
