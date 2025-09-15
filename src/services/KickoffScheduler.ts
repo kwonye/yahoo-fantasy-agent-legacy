@@ -4,12 +4,13 @@ interface WindowDef { dow: number; hh: number; mm: number }
 
 export interface KickoffOptions {
   preMinutes?: number[]; // e.g., [90, 60, 30]
-  windows?: WindowDef[]; // default NFL: Thu 20:20, Sun 13:00, Sun 16:25, Sun 20:20, Mon 20:15
+  windows?: WindowDef[]; // NFL weekly windows (ET canonical): Thu 20:15, Sun 09:30, Sun 13:00, Sun 16:05, Sun 16:25, Sun 20:20, Mon 20:15
+  timeZone?: string; // IANA zone for interpreting kickoff windows (default: America/New_York)
 }
 
 export class KickoffScheduler {
   private timers: NodeJS.Timeout[] = [];
-  private readonly opts: Required<KickoffOptions>;
+  private readonly opts: Required<Omit<KickoffOptions, 'timeZone'>> & { timeZone: string };
   private readonly task: KickoffTask;
 
   constructor(task: KickoffTask, opts: KickoffOptions = {}) {
@@ -17,12 +18,15 @@ export class KickoffScheduler {
     this.opts = {
       preMinutes: opts.preMinutes ?? [90, 60, 30],
       windows: opts.windows ?? [
-        { dow: 4, hh: 20, mm: 20 }, // Thu Night
-        { dow: 0, hh: 13, mm: 0 },  // Sun Early
-        { dow: 0, hh: 16, mm: 25 }, // Sun Late
-        { dow: 0, hh: 20, mm: 20 }, // SNF
-        { dow: 1, hh: 20, mm: 15 }, // MNF
+        { dow: 4, hh: 20, mm: 15 }, // Thu Night (TNF) 8:15 PM ET
+        { dow: 0, hh: 9,  mm: 30 }, // Sun International window (London/Europe) 9:30 AM ET (occasional)
+        { dow: 0, hh: 13, mm: 0  }, // Sun Early 1:00 PM ET
+        { dow: 0, hh: 16, mm: 5  }, // Sun Late 4:05 PM ET
+        { dow: 0, hh: 16, mm: 25 }, // Sun Late 4:25 PM ET
+        { dow: 0, hh: 20, mm: 20 }, // Sun Night (SNF) 8:20 PM ET
+        { dow: 1, hh: 20, mm: 15 }, // Mon Night (MNF) 8:15 PM ET
       ],
+      timeZone: opts.timeZone || 'America/New_York',
     };
   }
 
@@ -41,16 +45,15 @@ export class KickoffScheduler {
   }
 
   private scheduleNext(w: WindowDef, pre: number) {
-    const now = new Date();
-    const target = nextDowTime(w.dow, w.hh, w.mm);
-    const runAt = new Date(target.getTime() - pre * 60000);
+    const { DateTime } = require('luxon');
+    const zone = this.opts.timeZone;
+    const now = DateTime.now().setZone(zone);
+    const kickoff = nextDowTimeZoned(w.dow, w.hh, w.mm, now, zone);
+    let runAt = kickoff.minus({ minutes: pre });
     if (runAt <= now) {
-      // schedule for next week
-      const nextWeek = new Date(runAt.getTime() + 7 * 24 * 60 * 60000);
-      this.setTimer(nextWeek, w, pre);
-    } else {
-      this.setTimer(runAt, w, pre);
+      runAt = runAt.plus({ days: 7 });
     }
+    this.setTimer(runAt.toJSDate(), w, pre);
   }
 
   private setTimer(when: Date, w: WindowDef, pre: number) {
@@ -64,13 +67,12 @@ export class KickoffScheduler {
   }
 }
 
-function nextDowTime(dow: number, hh: number, mm: number): Date {
-  const now = new Date();
-  const d = new Date(now);
-  const delta = (dow - d.getDay() + 7) % 7;
-  d.setDate(d.getDate() + delta);
-  d.setHours(hh, mm, 0, 0);
-  if (d <= now) d.setDate(d.getDate() + 7);
-  return d;
+function nextDowTimeZoned(dow: number, hh: number, mm: number, now: any, zone: string) {
+  const { DateTime } = require('luxon');
+  const currDow0 = now.weekday % 7; // 0..6
+  const delta = (dow - currDow0 + 7) % 7;
+  let d = now.plus({ days: delta }).set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
+  if (d <= now) d = d.plus({ days: 7 });
+  // Ensure Date in system zone with same instant
+  return DateTime.fromMillis(d.toMillis(), { zone }).toJSDate ? d : d; // d is a DateTime; caller uses toJSDate/Date math
 }
-

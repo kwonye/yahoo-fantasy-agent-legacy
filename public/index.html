@@ -73,309 +73,326 @@
       </div>
     </nav>
     <div class="container">
-      <div class="row g-3">
-        <div class="col-lg-4">
-          <div class="card">
-            <div class="card-header">Health</div>
-            <div class="card-body mono" id="health">Loading…</div>
-          </div>
-        </div>
-        
-        <div class="col-lg-4">
-          <div class="card">
-            <div class="card-header">Metrics</div>
-            <div class="card-body mono" id="metrics">Loading…</div>
-          </div>
-        </div>
-      </div>
       <div class="row g-3 mt-1">
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>Recent Activity</span>
-              <div class="d-flex align-items-center gap-2">
-                <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">Refresh</button>
-                <button class="btn btn-sm btn-outline-danger" id="clearLogsBtn">Clear Activity</button>
+        <div class="col-lg-4 col-md-6 col-12">
+          <div class="row g-3">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">Health</div>
+                <div class="card-body mono" id="health">Loading…</div>
               </div>
             </div>
-            <div class="card-body">
-              <div class="table-responsive" id="recentActivityTableContainer" style="max-height: 360px; overflow-y: auto;">
-                <table class="table table-sm table-striped mono">
-                  <thead>
-                    <tr><th>Time</th><th>Type</th><th>Details</th></tr>
-                  </thead>
-                  <tbody id="activity"></tbody>
-                </table>
-              </div>
-              <div class="text-muted small" id="lastUpdated"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3 mt-1">
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>Gemini Activity</span>
-              <div class="d-flex flex-wrap gap-2 align-items-center">
-                <button class="btn btn-sm btn-outline-secondary" id="refreshGeminiBtn">Refresh</button>
-                <button class="btn btn-sm btn-outline-danger" id="clearGeminiBtn">Clear</button>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">Metrics</div>
+                <div class="card-body mono" id="metrics">Loading…</div>
               </div>
             </div>
-            <div class="card-body" style="max-height: 360px; overflow: auto;">
-              <div id="geminiChat" class="mono"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3 mt-1">
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header">Ask Gemini</div>
-            <div class="card-body">
-              <div class="d-flex flex-wrap gap-2 align-items-center">
-                <div class="input-group input-group-sm" style="max-width: 640px;">
-                  <span class="input-group-text">Prompt</span>
-                  <input id="geminiTestInput" class="form-control" placeholder="Ask Gemini..." />
-                  <button class="btn btn-primary" id="geminiTestBtn" type="button">Send</button>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">Credentials</div>
+                <div class="card-body">
+                  <div class="mb-2 mono" id="credsStatus" style="display:none"></div>
+                  <div class="mb-3">
+                    <div class="d-flex flex-wrap gap-2">
+                      <span class="badge bg-light text-dark" id="credsYahooBadge">Yahoo: Unknown</span>
+                      <span class="badge bg-light text-dark" id="credsGeminiBadge">Gemini: Unknown</span>
+                    </div>
+                    <div class="small text-muted mono" id="credsDetails"></div>
+                  </div>
+                  <form id="yahooForm" class="mono mb-3">
+                    <div class="mb-2">
+                      <label class="form-label">Yahoo Client ID</label>
+                      <div class="input-group input-group-sm">
+                        <input id="yClientId" type="password" class="form-control form-control-sm" />
+                        <button id="toggleYClientId" type="button" class="btn btn-outline-secondary">Show</button>
+                      </div>
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label">Yahoo Client Secret</label>
+                      <div class="input-group input-group-sm">
+                        <input id="yClientSecret" type="password" class="form-control form-control-sm" />
+                        <button id="toggleYSecret" type="button" class="btn btn-outline-secondary">Show</button>
+                      </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                      <button type="submit" class="btn btn-sm btn-secondary">Save Yahoo Creds</button>
+                      <a id="yahooConnectBtn" href="/auth/yahoo/start" class="btn btn-sm btn-outline-primary">Connect Yahoo</a>
+                    </div>
+                  </form>
+                  <form id="geminiForm" class="mono">
+                    <div class="mb-2">
+                      <label class="form-label">Gemini API Key</label>
+                      <div class="input-group input-group-sm">
+                        <input id="gApiKey" type="password" class="form-control form-control-sm" />
+                        <button id="toggleGApiKey" type="button" class="btn btn-outline-secondary">Show</button>
+                      </div>
+                    </div>
+                    <div class="mb-2"><label class="form-label">Gemini Model</label><input id="gModel" class="form-control form-control-sm" placeholder="gemini-2.5-pro" /></div>
+                    <button type="submit" class="btn btn-sm btn-secondary">Save Gemini Settings</button>
+                  </form>
+                  <hr/>
+                  <form id="runBotForm" class="mono">
+                    <div class="row g-2 mb-2">
+                      <div class="col-6">
+                        <label class="form-label">League</label>
+                        <div class="input-group input-group-sm">
+                          <span class="input-group-text">nfl.l.</span>
+                          <input id="leagueKeyInput" type="number" inputmode="numeric" pattern="[0-9]*" class="form-control form-control-sm" placeholder="1548559" />
+                        </div>
+                      </div>
+                      <div class="col-6">
+                        <label class="form-label">Team</label>
+                        <div class="input-group input-group-sm">
+                          <span class="input-group-text" id="teamPrefix">nfl.l._____.t.</span>
+                          <input id="teamKeyInput" type="number" inputmode="numeric" pattern="[0-9]*" class="form-control form-control-sm" placeholder="6" />
+                        </div>
+                      </div>
+                      <div class="col-12"><label class="form-label">Redirect URI</label><input id="redirectUriInput" class="form-control form-control-sm" placeholder="https://localhost:3000/auth/callback" /></div>
+                    </div>
+                    <div class="d-flex gap-2">
+                      <button type="button" class="btn btn-sm btn-secondary" id="saveKeysBtn">Save Keys</button>
+                      <button type="submit" class="btn btn-sm btn-outline-primary" id="runBotBtn">Run Bot Now</button>
+                    </div>
+                  </form>
+                  <!-- Daily schedule UI removed: scheduling is now managed by smart automation (waiver time + kickoff checks) -->
                 </div>
-                <button class="btn btn-sm btn-outline-primary" id="previewLineupBtn" type="button">Preview lineup prompt</button>
-                <button class="btn btn-sm btn-outline-secondary" id="previewWaiversBtn" type="button">Preview waivers prompt</button>
-                <button class="btn btn-sm btn-outline-secondary" id="previewTradeBtn" type="button">Preview trade prompt</button>
               </div>
-              <div class="row g-2 mt-2">
-                <div class="col-12 col-md-6">
-                  <label class="form-label small">Opponent Team #</label>
-                  <input id="theirTeamNumberInput" type="number" min="1" max="10" step="1" class="form-control form-control-sm mono" placeholder="3" />
-                </div>
-              </div>
-              <pre class="mono mt-2" id="geminiTestResult" style="white-space: pre-wrap;"></pre>
-              <pre class="mono mt-2" id="geminiPreview" style="white-space: pre-wrap; display:none;"></pre>
             </div>
           </div>
         </div>
-      </div>
-
-      <div class="row g-3 mt-1">
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>Current Roster</span>
-              <div class="d-flex align-items-center gap-3">
-                <div class="text-muted small" id="rosterMeta"></div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="row g-3">
-                <div class="col-12">
-                  <div class="table-responsive">
+        <div class="col-lg-8 col-md-6 col-12">
+          <div class="row g-3">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <span>Recent Activity</span>
+                  <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">Refresh</button>
+                    <button class="btn btn-sm btn-outline-danger" id="clearLogsBtn">Clear Activity</button>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="table-responsive" id="recentActivityTableContainer" style="max-height: 360px; overflow-y: auto;">
                     <table class="table table-sm table-striped mono">
-                      <thead><tr><th>Slot</th><th>Pos</th><th>Player</th><th>Team</th></tr></thead>
-                      <tbody id="rosterCombinedTbl"></tbody>
+                      <thead>
+                        <tr><th>Time</th><th>Type</th><th>Details</th></tr>
+                      </thead>
+                      <tbody id="activity"></tbody>
                     </table>
                   </div>
-                  <div class="small" id="startersMeta"></div>
+                  <div class="text-muted small" id="lastUpdated"></div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3 mt-1">
-        
-
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header">Credentials</div>
-            <div class="card-body">
-              <div class="mb-2 mono" id="credsStatus" style="display:none"></div>
-              <div class="mb-3">
-                <div class="d-flex flex-wrap gap-2">
-                  <span class="badge bg-light text-dark" id="credsYahooBadge">Yahoo: Unknown</span>
-                  <span class="badge bg-light text-dark" id="credsGeminiBadge">Gemini: Unknown</span>
-                </div>
-                <div class="small text-muted mono" id="credsDetails"></div>
-              </div>
-              <form id="yahooForm" class="mono mb-3">
-                <div class="mb-2"><label class="form-label">Yahoo Client ID</label><input id="yClientId" class="form-control form-control-sm" /></div>
-                <div class="mb-2"><label class="form-label">Yahoo Client Secret</label><input id="yClientSecret" class="form-control form-control-sm" /></div>
-                <div class="d-flex gap-2">
-                  <button type="submit" class="btn btn-sm btn-secondary">Save Yahoo Creds</button>
-                  <a id="yahooConnectBtn" href="/auth/yahoo/start" class="btn btn-sm btn-outline-primary">Connect Yahoo</a>
-                </div>
-              </form>
-              <form id="geminiForm" class="mono">
-                <div class="mb-2"><label class="form-label">Gemini API Key</label><input id="gApiKey" class="form-control form-control-sm" /></div>
-                <div class="mb-2"><label class="form-label">Gemini Model</label><input id="gModel" class="form-control form-control-sm" placeholder="gemini-2.5-flash" /></div>
-                <button type="submit" class="btn btn-sm btn-secondary">Save Gemini Settings</button>
-              </form>
-              <hr/>
-              <form id="runBotForm" class="mono">
-                <div class="row g-2 mb-2">
-                  <div class="col-6"><label class="form-label">League Key</label><input id="leagueKeyInput" class="form-control form-control-sm" placeholder="nfl.l.XXXXX" /></div>
-                  <div class="col-6"><label class="form-label">Team Key</label><input id="teamKeyInput" class="form-control form-control-sm" placeholder="nfl.l.XXXXX.t.Y" /></div>
-                </div>
-                <div class="d-flex gap-2">
-                  <button type="button" class="btn btn-sm btn-secondary" id="saveKeysBtn">Save Keys</button>
-                  <button type="submit" class="btn btn-sm btn-outline-primary" id="runBotBtn">Run Bot Now</button>
-                </div>
-              </form>
-              <!-- Daily schedule UI removed: scheduling is now managed by smart automation (waiver time + kickoff checks) -->
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3 mt-1">
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>League Profile (Scoring & Settings)</span>
-              <div class="d-flex gap-2">
-                <button class="btn btn-sm btn-outline-secondary" id="lpToggleBtn" type="button">Show</button>
-                <button class="btn btn-sm btn-outline-secondary" id="lpLoadBtn" type="button">Load</button>
-                <button class="btn btn-sm btn-outline-primary" id="lpPrefillBtn" type="button">Prefill Sample</button>
-                <button class="btn btn-sm btn-outline-secondary" id="lpEditBtn" type="button">Edit</button>
-                <button class="btn btn-sm btn-primary" id="lpSaveBtn" type="button" style="display:none">Save</button>
-                <button class="btn btn-sm btn-outline-danger" id="lpCancelBtn" type="button" style="display:none">Cancel</button>
-              </div>
-            </div>
-            <div class="card-body" id="lpBody" style="display:none">
-              <div id="leagueProfileView" class="mono"></div>
-              <textarea id="leagueProfileEdit" class="form-control mono" rows="12" style="display:none"></textarea>
-              <div class="small text-muted mt-2">Stored under <code>config/league_setting.json</code>. Note: when a scoring row shows <code>yahooDefault: null</code>, it means the Yahoo default equals the current league value.</div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="row g-3 mt-1">
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header">Automation</div>
-            <div class="card-body mono">
-                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                  <div>
-                    <input class="form-check-input" type="checkbox" id="kickoffEnabled" />
-                    <label class="form-check-label ms-2" for="kickoffEnabled">Enable Kickoff Checks (90/60/30 pre-windows)</label>
-                  </div>
-                  <button class="btn btn-sm btn-outline-secondary" id="runKickoffNowBtn" type="button">Run Kickoff Check</button>
-                </div>
-                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                  <div>
-                    <input class="form-check-input" type="checkbox" id="irAutomationEnabled" />
-                    <label class="form-check-label ms-2" for="irAutomationEnabled">Enable IR Automation (move OUT/INJ to IR; auto-activate)</label>
-                  </div>
-                  <button class="btn btn-sm btn-outline-secondary" id="runIrNowBtn" type="button">Run IR Now</button>
-                </div>
-                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                  <div>
-                    <input class="form-check-input" type="checkbox" id="waiverAutomationEnabled" />
-                    <label class="form-check-label ms-2" for="waiverAutomationEnabled">Enable Auto Waivers (weekly; uses WAIVER_DAY/HOUR/MINUTE)</label>
-                  </div>
-                  <button class="btn btn-sm btn-outline-secondary" id="runWaiversNowBtn" type="button">Run Waivers</button>
-                </div>
-                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                  <div>
-                    <input class="form-check-input" type="checkbox" id="pickupsAutomationEnabled" />
-                    <label class="form-check-label ms-2" for="pickupsAutomationEnabled">Enable Auto Pickups (immediate add/drop)</label>
-                  </div>
-                  <button class="btn btn-sm btn-outline-secondary" id="runPickupsNowBtn" type="button">Run Pickups</button>
-                </div>
-                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                  <div>
-                    <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
-                    <label class="form-check-label ms-2" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
-                  </div>
-                  <button class="btn btn-sm btn-outline-secondary" id="runTradesNowBtn" type="button">Run Trades</button>
-                </div>
-                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                  <div>
-                    <input class="form-check-input" type="checkbox" id="debugYahooEnabled" />
-                    <label class="form-check-label ms-2" for="debugYahooEnabled">Enable Debug Logs</label>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <span>Gemini Activity</span>
+                  <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <button class="btn btn-sm btn-outline-secondary" id="refreshGeminiBtn">Refresh</button>
+                    <button class="btn btn-sm btn-outline-danger" id="clearGeminiBtn">Clear</button>
                   </div>
                 </div>
-                <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
-                  <div>
-                    <input class="form-check-input" type="checkbox" id="applyChanges" />
-                    <label class="form-check-label ms-2" for="applyChanges">Apply Changes (actually execute trades, waivers, etc.)</label>
-                  </div>
-                  <div class="badge bg-warning text-dark">⚠️ Live Mode</div>
-                </div>
-              <button class="btn btn-sm btn-outline-success" id="saveFeaturesBtn">Save</button>
-              <div class="small text-muted mt-2" id="quotaSummary"></div>
-              <hr/>
-              <div>
-                <div class="fw-semibold mb-2">Upcoming Tasks</div>
-                <div class="table-responsive">
-                  <table class="table table-sm table-striped">
-                    <thead>
-                      <tr>
-                        <th>Action Type</th>
-                        <th>Scheduled Time</th>
-                        <th>Details</th>
-                      </tr>
-                    </thead>
-                    <tbody id="upcomingTasks">
-                      <tr>
-                        <td colspan="3" class="text-center text-muted">Loading...</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                <div class="card-body" style="max-height: 360px; overflow: auto;">
+                  <div id="geminiChat" class="mono"></div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-      <div class="row g-3 mt-1">
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>Incoming Trades</span>
-              <div class="d-flex gap-2">
-                <button class="btn btn-sm btn-outline-secondary" id="refreshTradesBtn">Refresh</button>
-                <button class="btn btn-sm btn-outline-secondary" id="dumpTradesBtn">Dump All</button>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">Ask Gemini</div>
+                <div class="card-body">
+                  <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <div class="input-group input-group-sm" style="max-width: 640px;">
+                      <span class="input-group-text">Prompt</span>
+                      <input id="geminiTestInput" class="form-control" placeholder="Ask Gemini..." />
+                      <button class="btn btn-primary" id="geminiTestBtn" type="button">Send</button>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" id="previewLineupBtn" type="button">Preview lineup prompt</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="previewWaiversBtn" type="button">Preview waivers prompt</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="previewTradeBtn" type="button">Preview trade prompt</button>
+                  </div>
+                  <div class="row g-2 mt-2">
+                    <div class="col-12 col-md-6">
+                      <label class="form-label small">Opponent Team #</label>
+                      <input id="theirTeamNumberInput" type="number" min="1" max="10" step="1" class="form-control form-control-sm mono" placeholder="3" />
+                    </div>
+                  </div>
+                  <pre class="mono mt-2" id="geminiTestResult" style="white-space: pre-wrap;"></pre>
+                  <pre class="mono mt-2" id="geminiPreview" style="white-space: pre-wrap; display:none;"></pre>
+                </div>
               </div>
             </div>
-            <div class="card-body">
-              <div class="table-responsive">
-                <table class="table table-sm table-striped mono">
-                  <thead><tr><th>ID</th><th>Status</th><th>Actions</th></tr></thead>
-                  <tbody id="tradesTbl"></tbody>
-                </table>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <span>Current Roster</span>
+                  <div class="d-flex align-items-center gap-3">
+                    <div class="text-muted small" id="rosterMeta"></div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="row g-3">
+                    <div class="col-12">
+                      <div class="table-responsive">
+                        <table class="table table-sm table-striped mono">
+                          <thead><tr><th>Slot</th><th>Pos</th><th>Player</th><th>Team</th></tr></thead>
+                          <tbody id="rosterCombinedTbl"></tbody>
+                        </table>
+                      </div>
+                      <div class="small" id="startersMeta"></div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <pre id="tradesDumpView" class="mono json-pre mt-2" style="display:none"></pre>
             </div>
-          </div>
-        </div>
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>Trade Block</span>
-              <button class="btn btn-sm btn-outline-secondary" id="refreshTradeBlockBtn">Refresh</button>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                  <span>League Profile (Scoring & Settings)</span>
+                  <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" id="lpToggleBtn" type="button">Show</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="lpLoadBtn" type="button">Load</button>
+                    <button class="btn btn-sm btn-outline-primary" id="lpPrefillBtn" type="button">Prefill Sample</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="lpEditBtn" type="button">Edit</button>
+                    <button class="btn btn-sm btn-primary" id="lpSaveBtn" type="button" style="display:none">Save</button>
+                    <button class="btn btn-sm btn-outline-danger" id="lpCancelBtn" type="button" style="display:none">Cancel</button>
+                  </div>
+                </div>
+                <div class="card-body" id="lpBody" style="display:none">
+                  <div id="leagueProfileView" class="mono"></div>
+                  <textarea id="leagueProfileEdit" class="form-control mono" rows="12" style="display:none"></textarea>
+                  <div class="small text-muted mt-2">Stored under <code>config/league_setting.json</code>. Note: when a scoring row shows <code>yahooDefault: null</code>, it means the Yahoo default equals the current league value.</div>
+                </div>
+              </div>
             </div>
-            <div class="card-body">
-              <div class="small text-muted">Derived automatically by Gemini from your roster and league settings.</div>
-              <pre id="tradeBlockView" class="mono json-pre mt-2"></pre>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">Automation</div>
+                <div class="card-body mono">
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="kickoffEnabled" />
+                        <label class="form-check-label ms-2" for="kickoffEnabled">Enable Kickoff Checks (90/60/30 pre-windows)</label>
+                      </div>
+                      <button class="btn btn-sm btn-outline-secondary" id="runKickoffNowBtn" type="button">Run Kickoff Check</button>
+                    </div>
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="irAutomationEnabled" />
+                        <label class="form-check-label ms-2" for="irAutomationEnabled">Enable IR Automation (move OUT/INJ to IR; auto-activate)</label>
+                      </div>
+                      <button class="btn btn-sm btn-outline-secondary" id="runIrNowBtn" type="button">Run IR Now</button>
+                    </div>
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="waiverAutomationEnabled" />
+                        <label class="form-check-label ms-2" for="waiverAutomationEnabled">Enable Auto Waivers (weekly; uses WAIVER_DAY/HOUR/MINUTE)</label>
+                      </div>
+                      <button class="btn btn-sm btn-outline-secondary" id="runWaiversNowBtn" type="button">Run Waivers</button>
+                    </div>
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="pickupsAutomationEnabled" />
+                        <label class="form-check-label ms-2" for="pickupsAutomationEnabled">Enable Auto Pickups (immediate add/drop)</label>
+                      </div>
+                      <button class="btn btn-sm btn-outline-secondary" id="runPickupsNowBtn" type="button">Run Pickups</button>
+                    </div>
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
+                        <label class="form-check-label ms-2" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
+                      </div>
+                      <button class="btn btn-sm btn-outline-secondary" id="runTradesNowBtn" type="button">Run Trades</button>
+                    </div>
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="debugYahooEnabled" />
+                        <label class="form-check-label ms-2" for="debugYahooEnabled">Enable Debug Logs</label>
+                      </div>
+                    </div>
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="applyChanges" />
+                        <label class="form-check-label ms-2" for="applyChanges">Apply Changes (actually execute trades, waivers, etc.)</label>
+                      </div>
+                      <div class="badge bg-warning text-dark">⚠️ Live Mode</div>
+                    </div>
+                  <button class="btn btn-sm btn-outline-success" id="saveFeaturesBtn">Save</button>
+                  <div class="small text-muted mt-2" id="quotaSummary"></div>
+                  <hr/>
+                  <div>
+                    <div class="fw-semibold mb-2">Upcoming Tasks</div>
+                    <div class="table-responsive">
+                      <table class="table table-sm table-striped">
+                        <thead>
+                          <tr>
+                            <th>Action Type</th>
+                            <th>Scheduled Time</th>
+                            <th>Details</th>
+                          </tr>
+                        </thead>
+                        <tbody id="upcomingTasks">
+                          <tr>
+                            <td colspan="3" class="text-center text-muted">Loading...</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
-      <div class="row g-3 mt-1">
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header">Transactions Summary</div>
-            <div class="card-body">
-              <div class="table-responsive">
-                <table class="table table-sm table-striped">
-                  <thead>
-                    <tr><th>Time</th><th>Type</th><th>Details</th></tr>
-                  </thead>
-                  <tbody id="txSummary"><tr><td colspan="3" class="text-muted text-center">Loading…</td></tr></tbody>
-                </table>
+            <div class="col-12">
+              <div class="row g-3">
+                <div class="col-lg-6">
+                  <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                      <span>Incoming Trades</span>
+                      <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" id="refreshTradesBtn">Refresh</button>
+                        <button class="btn btn-sm btn-outline-secondary" id="dumpTradesBtn">Dump All</button>
+                      </div>
+                    </div>
+                    <div class="card-body">
+                      <div class="table-responsive">
+                        <table class="table table-sm table-striped mono">
+                          <thead><tr><th>ID</th><th>Status</th><th>Actions</th></tr></thead>
+                          <tbody id="tradesTbl"></tbody>
+                        </table>
+                      </div>
+                      <pre id="tradesDumpView" class="mono json-pre mt-2" style="display:none"></pre>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-lg-6">
+                  <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                      <span>Trade Block</span>
+                      <button class="btn btn-sm btn-outline-secondary" id="refreshTradeBlockBtn">Refresh</button>
+                    </div>
+                    <div class="card-body">
+                      <div class="small text-muted">Derived automatically by Gemini from your roster and league settings.</div>
+                      <pre id="tradeBlockView" class="mono json-pre mt-2"></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">Transactions Summary</div>
+                <div class="card-body">
+                  <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                      <thead>
+                        <tr><th>Time</th><th>Type</th><th>Details</th>
+                      </tr></thead>
+                      <tbody id="txSummary"><tr><td colspan="3" class="text-muted text-center">Loading…</td></tr></tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -414,6 +431,42 @@
           return String(obj);
         }
       }
+      // Key normalization helpers so users can type just numbers
+      function normLeagueKey(val) {
+        const s = String(val || '').trim();
+        if (!s) return '';
+        if (/^nfl\.l\.\d+$/i.test(s)) return s;
+        if (/^\d+$/.test(s)) return `nfl.l.${s}`;
+        const m = s.match(/(\d{4,})/);
+        return m ? `nfl.l.${m[1]}` : s;
+      }
+      function normTeamKey(leagueVal, teamVal) {
+        const lk = normLeagueKey(leagueVal);
+        const t = String(teamVal || '').trim();
+        if (!t) return '';
+        if (/^nfl\.l\.\d+\.t\.\d+$/i.test(t)) return t;
+        if (/^\d+$/.test(t)) return lk ? `${lk}.t.${t}` : t;
+        const m = t.match(/(?:^|\.)t\.(\d+)$/i);
+        return (m && lk) ? `${lk}.t.${m[1]}` : t;
+      }
+      function extractLeagueId(full) {
+        const s = String(full || '');
+        const m = s.match(/(\d{4,})/);
+        return m ? m[1] : '';
+      }
+      function extractTeamNum(full) {
+        const s = String(full || '');
+        const m = s.match(/\.t\.(\d+)/);
+        return m ? m[1] : '';
+      }
+      function updateTeamPrefix() {
+        try {
+          const leagueDigits = String((document.getElementById('leagueKeyInput')||{}).value || '').replace(/\D/g,'');
+          const span = document.getElementById('teamPrefix');
+          if (span) span.textContent = `nfl.l.${leagueDigits || '_____'} .t.`.replace(' .t.','.t.');
+        } catch {}
+      }
+
       function setJson(id, obj) {
         const el = document.getElementById(id);
         if (!el) return;
@@ -480,9 +533,13 @@
         console.log('Environment data:', env);
         const leagueEl = document.getElementById('leagueKeyInput');
         const teamEl = document.getElementById('teamKeyInput');
-        // Server defaults
-        if (leagueEl) leagueEl.value = env.leagueKey || '';
-        if (teamEl) teamEl.value = env.teamKey || '';
+        const redirectUriEl = document.getElementById('redirectUriInput');
+        // Server defaults -> digits only
+        const envLeagueDigits = extractLeagueId(env.leagueKey || '');
+        const envTeamDigits = extractTeamNum(env.teamKey || '');
+        if (leagueEl) leagueEl.value = envLeagueDigits;
+        if (teamEl) teamEl.value = envTeamDigits;
+        if (redirectUriEl) redirectUriEl.value = env.redirectUri || '';
         // Features: read only from /api/features (do not fall back to env)
         try {
           const feat = await fetchJson('/api/features');
@@ -504,14 +561,44 @@
           setChk('applyChanges', f.applyChanges);
         } catch (e) { console.warn('features load failed', e); }
         // Overlay local preferences if present
-        const lk = lsGet('leagueKey',''); if (lk && leagueEl) leagueEl.value = lk;
-        const tk = lsGet('teamKey',''); if (tk && teamEl) teamEl.value = tk;
+        const lk = lsGet('leagueKey',''); if (lk && leagueEl) leagueEl.value = extractLeagueId(lk) || lk;
+        const tk = lsGet('teamKey',''); if (tk && teamEl) teamEl.value = extractTeamNum(tk) || tk;
+        updateTeamPrefix();
       }
       async function refresh() {
         console.log('refresh() called');
         try {
           setJson('health', await fetchJson('/health'));
           const creds = await fetchJson('/api/creds'); console.log('Credentials:', creds); setCredsSummary(creds);
+          // Populate Yahoo Client ID/Secret inputs from saved creds if available
+          try {
+            const raw = await fetch('/api/creds/yahoo/raw', { cache: 'no-store' }).then(r=>r.json()).catch(()=>null);
+            if (raw && raw.ok) {
+              const idEl = document.getElementById('yClientId');
+              const secEl = document.getElementById('yClientSecret');
+              // Only overwrite if not focused to avoid clobbering edits
+              if (idEl && document.activeElement !== idEl && idEl.value !== (raw.clientId || '')) idEl.value = raw.clientId || '';
+              if (secEl && document.activeElement !== secEl && secEl.value !== (raw.clientSecret || '')) secEl.value = raw.clientSecret || '';
+            }
+          } catch (e) { /* ignore */ }
+          // Autofill Gemini model input if empty, defaulting to gemini-2.5-pro
+          try {
+            const gm = document.getElementById('gModel');
+            if (gm && !gm.value) {
+              const m = creds?.creds?.gemini?.model || 'gemini-2.5-pro';
+              gm.value = m;
+            }
+          } catch (e) { /* ignore */ }
+          // Populate Gemini API key and model from raw if available
+          try {
+            const rawG = await fetch('/api/creds/gemini/raw', { cache: 'no-store' }).then(r=>r.json()).catch(()=>null);
+            if (rawG && rawG.ok) {
+              const keyEl = document.getElementById('gApiKey');
+              const modelEl = document.getElementById('gModel');
+              if (keyEl && document.activeElement !== keyEl && keyEl.value !== (rawG.apiKey || '')) keyEl.value = rawG.apiKey || '';
+              if (modelEl && !modelEl.value) modelEl.value = rawG.model || (creds?.creds?.gemini?.model) || 'gemini-2.5-pro';
+            }
+          } catch (e) { /* ignore */ }
           // Get features data for mode badge
           try {
             const features = await fetchJson('/api/features');
@@ -577,11 +664,15 @@
           
           // Add waiver task
           if (j.waiver && j.waiver.enabled) {
+            const waiverTime = new Date(j.waiver.nextRunISO);
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const waiverDay = dayNames[waiverTime.getDay()];
+            const waiverLocalStr = waiverTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
             tasks.push({
               type: 'Waiver Processing',
-              time: new Date(j.waiver.nextRunISO),
-              details: `Weekly waivers (${j.waiver.source || 'default'} schedule)`,
-              sortTime: new Date(j.waiver.nextRunISO).getTime()
+              time: waiverTime,
+              details: `Weekly waivers (${j.waiver.source || 'default'}) — ${waiverDay} ${waiverLocalStr}`,
+              sortTime: waiverTime.getTime()
             });
           }
           
@@ -589,14 +680,17 @@
           if (j.kickoff && j.kickoff.enabled && Array.isArray(j.kickoff.upcoming)) {
             j.kickoff.upcoming.slice(0, 10).forEach(task => {
               const runTime = new Date(task.runAtISO);
+              // Convert the kickoff moment to the browser's local timezone by
+              // adding the preMinutes to the runTime (which is the pre-check time)
+              const kickoffLocal = new Date(runTime.getTime() + task.preMinutes * 60000);
               const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-              const dayName = dayNames[task.window.dow];
-              const kickoffTime = `${dayName} ${task.window.hh.toString().padStart(2, '0')}:${task.window.mm.toString().padStart(2, '0')}`;
-              
+              const dayNameLocal = dayNames[kickoffLocal.getDay()];
+              const kickoffLocalStr = kickoffLocal.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
               tasks.push({
                 type: 'Kickoff Check',
                 time: runTime,
-                details: `T-${task.preMinutes}m before ${kickoffTime}`,
+                details: `T-${task.preMinutes}m before ${dayNameLocal} ${kickoffLocalStr}`,
                 sortTime: runTime.getTime()
               });
             });
@@ -610,7 +704,7 @@
             tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No scheduled tasks</td></tr>';
           } else {
             tbody.innerHTML = tasks.map(task => {
-              const timeStr = task.time.toLocaleString();
+              const timeStr = task.time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
               const timeFromNow = getTimeFromNow(task.time);
               return `
                 <tr>
@@ -648,8 +742,10 @@
       async function refreshTrades(){
         try {
           const env = await fetchJson('/api/env');
-          const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || env.leagueKey || '';
-          const teamKey = (document.getElementById('teamKeyInput') || {}).value || env.teamKey || '';
+          const leagueRaw = (document.getElementById('leagueKeyInput') || {}).value || env.leagueKey || '';
+          const teamRaw = (document.getElementById('teamKeyInput') || {}).value || env.teamKey || '';
+          const leagueKey = normLeagueKey(leagueRaw);
+          const teamKey = normTeamKey(leagueKey || env.leagueKey || '', teamRaw);
           const r = await fetch('/api/trades/incoming?leagueKey=' + encodeURIComponent(leagueKey) + (teamKey ? ('&teamKey=' + encodeURIComponent(teamKey)) : '') + '&debug=1');
           const j = await r.json();
           const tbl = document.getElementById('tradesTbl');
@@ -774,9 +870,11 @@
       document.getElementById('lpSaveBtn')?.addEventListener('click', lpSave);
       document.getElementById('lpCancelBtn')?.addEventListener('click', refreshLeagueProfile);
       async function refreshRoster() {
-        const leagueKey = document.getElementById('leagueKeyInput').value || undefined;
-        const teamKey = document.getElementById('teamKeyInput').value || undefined;
-        const q = teamKey ? `?teamKey=${encodeURIComponent(teamKey)}` : '';
+        const leagueRaw = document.getElementById('leagueKeyInput').value || undefined;
+        const teamRaw = document.getElementById('teamKeyInput').value || undefined;
+        const leagueKey = normLeagueKey(leagueRaw || '');
+        const teamKeyFull = normTeamKey(leagueKey, teamRaw || '');
+        const q = teamKeyFull ? `?teamKey=${encodeURIComponent(teamKeyFull)}` : '';
         try {
           const data = await fetchJson('/api/roster' + q);
           const entries = data.roster || [];
@@ -806,7 +904,7 @@
           const startersMetaEl = document.getElementById('startersMeta');
           // Compare with league settings if available
           try {
-            const leagueKeyParam = (document.getElementById('leagueKeyInput').value || (await fetchJson('/api/env')).leagueKey);
+            const leagueKeyParam = normLeagueKey(document.getElementById('leagueKeyInput').value || (await fetchJson('/api/env')).leagueKey);
             if (leagueKeyParam) {
               const lr = await fetchJson('/api/league?leagueKey=' + encodeURIComponent(leagueKeyParam));
               const req = lr?.league?.settings?.rosterPositions || {};
@@ -873,9 +971,38 @@
         alert(j.ok ? 'Yahoo creds saved' : 'Save failed: ' + j.error);
         refresh();
       });
+      // Connect Yahoo: if creds not saved, try saving from text fields, then redirect
+      document.getElementById('yahooConnectBtn')?.addEventListener('click', async (e) => {
+        try {
+          e.preventDefault();
+          const creds = await fetch('/api/creds').then(r=>r.json()).catch(()=>null);
+          let hasSaved = !!(creds && creds.creds && creds.creds.yahoo);
+          if (!hasSaved) {
+            const clientId = (document.getElementById('yClientId')||{}).value || '';
+            const clientSecret = (document.getElementById('yClientSecret')||{}).value || '';
+            if (!clientId || !clientSecret) {
+              alert('Enter Yahoo Client ID and Secret first.');
+              return;
+            }
+            const resp = await fetch('/api/creds/yahoo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId, clientSecret }) });
+            const j = await resp.json();
+            if (!j || j.ok !== true) {
+              alert('Failed to save Yahoo creds: ' + (j && j.error ? j.error : 'unknown'));
+              return;
+            }
+          }
+          // Redirect to OAuth start
+          window.location.href = '/auth/yahoo/start';
+        } catch (err) {
+          alert('Unable to start Yahoo connect: ' + (err && err.message ? err.message : String(err)));
+        }
+      });
       document.getElementById('geminiForm').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const body = { apiKey: document.getElementById('gApiKey').value };
+        const body = { 
+          apiKey: document.getElementById('gApiKey').value,
+          model: (document.getElementById('gModel') || {}).value || 'gemini-2.5-pro'
+        };
         const r = await fetch('/api/creds/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const j = await r.json();
         alert(j.ok ? 'Gemini key saved' : 'Save failed: ' + j.error);
@@ -884,10 +1011,13 @@
       const saveKeysBtn = document.getElementById('saveKeysBtn');
       if (saveKeysBtn) {
         saveKeysBtn.addEventListener('click', async () => {
-          const leagueKey = (document.getElementById('leagueKeyInput')||{}).value || '';
-          const teamKey = (document.getElementById('teamKeyInput')||{}).value || '';
+          const leagueRaw = (document.getElementById('leagueKeyInput')||{}).value || '';
+          const teamRaw = (document.getElementById('teamKeyInput')||{}).value || '';
+          const leagueKey = normLeagueKey(leagueRaw);
+          const teamKey = normTeamKey(leagueKey, teamRaw);
+          const redirectUri = (document.getElementById('redirectUriInput')||{}).value || '';
           if (!leagueKey || !teamKey) { alert('Please enter both League Key and Team Key.'); return; }
-          const r = await fetch('/api/env', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueKey, teamKey }) });
+          const r = await fetch('/api/env', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueKey, teamKey, redirectUri }) });
           const j = await r.json();
           alert(j && j.ok ? 'Keys saved' : ('Save failed: ' + (j && j.error || 'unknown')));
           lsSet('leagueKey', leagueKey); lsSet('teamKey', teamKey);
@@ -896,9 +1026,11 @@
       }
       document.getElementById('runBotForm').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
-        const teamKey = (document.getElementById('teamKeyInput') || {}).value || '';
-        lsSet('leagueKey', leagueKey); lsSet('teamKey', teamKey);
+        const leagueRaw = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const teamRaw = (document.getElementById('teamKeyInput') || {}).value || '';
+        const leagueKey = normLeagueKey(leagueRaw);
+        const teamKey = normTeamKey(leagueKey, teamRaw);
+        lsSet('leagueKey', leagueRaw); lsSet('teamKey', teamRaw);
         const body = { leagueKey, teamKey };
         const r = await fetch('/api/bot/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const j = await r.json();
@@ -908,6 +1040,24 @@
       document.getElementById('refreshBtn').addEventListener('click', refresh);
       document.getElementById('refreshGeminiBtn')?.addEventListener('click', refreshGemini);
       document.getElementById('clearGeminiBtn')?.addEventListener('click', async () => { await fetch('/api/gemini/clear', { method: 'POST' }); await refreshGemini(); });
+      document.getElementById('leagueKeyInput')?.addEventListener('input', updateTeamPrefix);
+      // Toggle visibility for Yahoo Client ID/Secret and Gemini API key
+      (function(){
+        const attach = (btnId, inputId) => {
+          const btn = document.getElementById(btnId);
+          const inp = document.getElementById(inputId);
+          if (btn && inp) {
+            btn.addEventListener('click', () => {
+              const isPassword = inp.getAttribute('type') === 'password';
+              inp.setAttribute('type', isPassword ? 'text' : 'password');
+              btn.textContent = isPassword ? 'Hide' : 'Show';
+            });
+          }
+        };
+        attach('toggleYClientId', 'yClientId');
+        attach('toggleYSecret', 'yClientSecret');
+        attach('toggleGApiKey', 'gApiKey');
+      })();
       document.getElementById('geminiTestBtn')?.addEventListener('click', async () => {
         const el = document.getElementById('geminiTestInput');
         const prompt = (el && (el['value'] !== undefined)) ? el['value'] : 'Say hello.';
@@ -918,8 +1068,10 @@
         await refreshGemini();
       });
       document.getElementById('previewLineupBtn')?.addEventListener('click', async () => {
-        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
-        const teamKey = (document.getElementById('teamKeyInput') || {}).value || '';
+        const leagueRaw = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const teamRaw = (document.getElementById('teamKeyInput') || {}).value || '';
+        const leagueKey = normLeagueKey(leagueRaw);
+        const teamKey = normTeamKey(leagueKey, teamRaw);
         const area = document.getElementById('geminiPreview');
         if (area) { area.style.display = 'block'; area.textContent = 'Loading preview…'; }
         try {
@@ -973,7 +1125,7 @@
         }
       });
       document.getElementById('previewWaiversBtn')?.addEventListener('click', async () => {
-        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const leagueKey = normLeagueKey((document.getElementById('leagueKeyInput') || {}).value || '');
         const area = document.getElementById('geminiPreview');
         if (area) { area.style.display = 'block'; area.textContent = 'Loading waivers preview…'; }
         if (!leagueKey) { if (area) area.textContent = 'Error: leagueKey is required'; return; }
@@ -991,8 +1143,10 @@
         }
       });
       document.getElementById('previewTradeBtn')?.addEventListener('click', async () => {
-        const leagueKey = (document.getElementById('leagueKeyInput') || {}).value || '';
-        const teamKey = (document.getElementById('teamKeyInput') || {}).value || '';
+        const leagueRaw = (document.getElementById('leagueKeyInput') || {}).value || '';
+        const teamRaw = (document.getElementById('teamKeyInput') || {}).value || '';
+        const leagueKey = normLeagueKey(leagueRaw);
+        const teamKey = normTeamKey(leagueKey, teamRaw);
         const theirTeamNumberStr = (document.getElementById('theirTeamNumberInput') || {}).value || '';
         const theirTeamNumber = theirTeamNumberStr === '' ? undefined : parseInt(theirTeamNumberStr, 10);
         const area = document.getElementById('geminiPreview');

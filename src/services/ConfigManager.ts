@@ -114,6 +114,7 @@ export class ConfigManager {
     const seeded: AppSettings = this.applyAppDefaults({
       leagueKey: '',
       teamKey: '',
+      redirectUri: '',
       scheduleEnabled: false,
       scheduleHour: 9,
       scheduleMinute: 0,
@@ -142,6 +143,7 @@ export class ConfigManager {
     const base: AppSettings = {
       leagueKey: String(p.leagueKey || ''),
       teamKey: String(p.teamKey || ''),
+      redirectUri: String(p.redirectUri || ''),
       scheduleEnabled: !!p.scheduleEnabled,
       scheduleHour: coerce(p.scheduleHour, 9),
       scheduleMinute: coerce(p.scheduleMinute, 0),

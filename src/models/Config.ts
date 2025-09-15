@@ -8,6 +8,7 @@ export interface BotConfig {
 export interface AppSettings {
   leagueKey: string;
   teamKey: string;
+  redirectUri: string;
   scheduleEnabled: boolean;
   scheduleHour: number;
   scheduleMinute: number;

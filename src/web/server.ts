@@ -28,6 +28,30 @@ let appSettings = cmInit.loadAppSettings();
 const tradeBlockCache = new Map<string, { ts: number; data: { needs: string[]; surplus: string[]; reasoning: string } }>();
 const TRADE_BLOCK_TTL_MS = 2 * 60 * 1000;
 
+// ---------- Helpers: normalize League/Team keys ----------
+function normalizeLeagueKeyInput(input: any): string {
+  const raw = String(input ?? '').trim();
+  if (!raw) return '';
+  if (/^nfl\.l\.\d+$/i.test(raw)) return raw;
+  if (/^\d+$/.test(raw)) return `nfl.l.${raw}`;
+  const m = raw.match(/(\d{4,})/);
+  if (m) return `nfl.l.${m[1]}`;
+  return raw;
+}
+
+function normalizeTeamKeyInput(leagueKeyMaybe: any, input: any): string {
+  const lk = normalizeLeagueKeyInput(leagueKeyMaybe);
+  const raw = String(input ?? '').trim();
+  if (!raw) return '';
+  if (/^nfl\.l\.\d+\.t\.\d+$/i.test(raw)) return raw;
+  if (/^\d+$/.test(raw)) {
+    return lk ? `${lk}.t.${raw}` : raw; // if no league known, return digits and let caller handle
+  }
+  const m = raw.match(/(?:^|\.)t\.(\d+)$/i);
+  if (m && lk) return `${lk}.t.${m[1]}`;
+  return raw;
+}
+
 // Simple Server-Sent Events (SSE) broadcaster for push updates
 const sseClients = new Set<http.ServerResponse>();
 function sseBroadcast(event: string, payload: any) {
@@ -51,8 +75,9 @@ app.get('/health', (_req, res) => {
 
 // ---------------- Yahoo OAuth ----------------
 function computeRedirectUri(req: express.Request, overridePath?: '/auth/callback' | '/oauth/callback'): string {
-  // Prefer explicit env to match Yahoo app registration exactly
-  const env = (process.env.REDIRECT_URI || '').trim();
+  const cm = new ConfigManager();
+  const settings = cm.loadAppSettings();
+  const env = (settings.redirectUri || '').trim();
   if (env) {
     if (overridePath) {
       try {
@@ -121,7 +146,6 @@ async function handleYahooCallback(req: express.Request, res: express.Response) 
     const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const host = req.headers.host || `localhost:${defaultPort}`;
     const redirectFromReq = `${proto}://${host}${req.path}`;
-    const envRedirect = (process.env.REDIRECT_URI || '').trim();
     const debug = String(process.env.DEBUG_OAUTH || '0') === '1';
     const attempt = async (uri: string) => {
       if (debug) console.log('[OAuth] Exchanging code with redirect_uri=', uri);
@@ -132,17 +156,7 @@ async function handleYahooCallback(req: express.Request, res: express.Response) 
     } catch (e1: any) {
       const msg1 = e1 && e1.message ? e1.message : String(e1);
       if (debug) console.warn('[OAuth] First exchange failed:', msg1);
-      // Fallback to env redirect if different
-      if (envRedirect && envRedirect !== redirectFromReq) {
-        try {
-          await attempt(envRedirect);
-        } catch (e2: any) {
-          const msg2 = e2 && e2.message ? e2.message : String(e2);
-          throw new Error(`OAuth exchange failed (tried ${redirectFromReq} then env ${envRedirect}): ${msg2}`);
-        }
-      } else {
-        throw new Error(`OAuth exchange failed (redirect_uri=${redirectFromReq}): ${msg1}`);
-      }
+      throw new Error(`OAuth exchange failed (redirect_uri=${redirectFromReq}): ${msg1}`);
     }
     // Redirect back to dashboard with a success flag
     const base = `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'http'}://${req.headers.host}`;
@@ -198,10 +212,7 @@ app.post('/api/oauth/exchange', async (req, res) => {
     }
     if (!code) { res.status(400).json({ ok: false, error: 'Missing authorization code' }); return; }
     if (!redirectUri) {
-      // Fallback to environment REDIRECT_URI or compute from request host
-      const env = (process.env.REDIRECT_URI || '').trim();
-      if (env) redirectUri = env;
-      else redirectUri = computeRedirectUri(req);
+      redirectUri = computeRedirectUri(req);
     }
     const cm = new ConfigManager();
     const oauth = new YahooOAuthClient(cm);
@@ -306,21 +317,31 @@ app.get('/api/schedule/preview', (_req, res) => {
     ];
     const upcoming: Array<{ runAtISO: string; preMinutes: number; window: { dow: number; hh: number; mm: number } }> = [];
     if (kickoffEnabled) {
-      const now = Date.now();
-      const nextDowTime = (dow: number, hh: number, mm: number) => {
-        const d = new Date();
-        const delta = (dow - d.getDay() + 7) % 7;
-        const n = new Date(d);
-        n.setDate(d.getDate() + delta);
-        n.setHours(hh, mm, 0, 0);
-        if (n.getTime() <= Date.now()) n.setDate(n.getDate() + 7);
-        return n;
+      const { DateTime } = require('luxon');
+      const zone = 'America/New_York'; // NFL kickoff windows are defined in ET
+      const nowMillis = Date.now();
+      const now = DateTime.now().setZone(zone);
+      const nextDowTimeZoned = (dow: number, hh: number, mm: number) => {
+        const currDow0 = now.weekday % 7; // 0..6
+        const delta = (dow - currDow0 + 7) % 7;
+        let dt = now.plus({ days: delta }).set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
+        if (dt.toMillis() <= nowMillis) dt = dt.plus({ days: 7 });
+        return dt;
       };
-      for (const w of windows) {
-        const kickoff = nextDowTime(w.dow, w.hh, w.mm).getTime();
+      const windowsEt = [
+        { dow: 4, hh: 20, mm: 15 }, // Thu 8:15 PM ET
+        { dow: 0, hh: 9,  mm: 30 }, // Sun 9:30 AM ET (international weeks only)
+        { dow: 0, hh: 13, mm: 0  }, // Sun 1:00 PM ET
+        { dow: 0, hh: 16, mm: 5  }, // Sun 4:05 PM ET
+        { dow: 0, hh: 16, mm: 25 }, // Sun 4:25 PM ET
+        { dow: 0, hh: 20, mm: 20 }, // Sun 8:20 PM ET
+        { dow: 1, hh: 20, mm: 15 }, // Mon 8:15 PM ET
+      ];
+      for (const w of windowsEt) {
+        const kickoff = nextDowTimeZoned(w.dow, w.hh, w.mm).toMillis();
         for (const pre of preMinutes) {
           const runAt = new Date(kickoff - pre * 60000);
-          if (runAt.getTime() > now) upcoming.push({ runAtISO: runAt.toISOString(), preMinutes: pre, window: w });
+          if (runAt.getTime() > nowMillis) upcoming.push({ runAtISO: runAt.toISOString(), preMinutes: pre, window: w });
         }
       }
       // Sort by soonest and keep next ~10
@@ -351,7 +372,7 @@ app.get('/api/creds', (_req, res) => {
     // Do not fallback to environment for Gemini API key; require saving via dashboard
     const responseData = { ok: true, creds: {
       yahoo: yahoo ? { clientId: mask(yahoo.clientId), hasRefresh: !!yahoo.refreshToken, source } : null,
-      gemini: gemini ? { apiKey: mask(gemini.apiKey), model: (gemini as any).model || 'gemini-2.5-flash' } : null,
+      gemini: gemini ? { apiKey: mask(gemini.apiKey), model: (gemini as any).model || 'gemini-2.5-pro' } : null,
     }};
     console.log('[/api/creds] Sending response:', responseData);
     res.json(responseData);
@@ -396,10 +417,37 @@ app.post('/api/creds/gemini', (req, res) => {
   }
 });
 
+// Return raw Gemini credentials (unmasked) for local display in the dashboard
+app.get('/api/creds/gemini/raw', (_req, res) => {
+  try {
+    try { res.setHeader('Cache-Control', 'no-store'); } catch {}
+    const cm = new ConfigManager();
+    const c = cm.loadGeminiCredentials();
+    if (!c) { res.json({ ok: false, error: 'No Gemini credentials saved' }); return; }
+    res.json({ ok: true, apiKey: c.apiKey || '', model: (c as any).model || '' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+// Return raw Yahoo client credentials (unmasked) for local display in the dashboard
+// Note: Intended for local use; avoid exposing broadly.
+app.get('/api/creds/yahoo/raw', (_req, res) => {
+  try {
+    try { res.setHeader('Cache-Control', 'no-store'); } catch {}
+    const cm = new ConfigManager();
+    const c = cm.loadYahooCredentials();
+    if (!c) { res.json({ ok: false, error: 'No Yahoo credentials saved' }); return; }
+    res.json({ ok: true, clientId: c.clientId || '', clientSecret: c.clientSecret || '' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 app.post('/api/bot/run', async (req, res) => {
   const s = new ConfigManager().loadAppSettings();
-  const leagueKey = req.body?.leagueKey || s.leagueKey;
-  const teamKey = req.body?.teamKey || s.teamKey;
+  const leagueKey = normalizeLeagueKeyInput(req.body?.leagueKey || s.leagueKey);
+  const teamKey = normalizeTeamKeyInput(leagueKey || s.leagueKey, req.body?.teamKey || s.teamKey);
   if (!leagueKey || !teamKey) {
     res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return;
   }
@@ -415,7 +463,7 @@ app.post('/api/bot/run', async (req, res) => {
 
 app.get('/api/roster', async (req, res) => {
   const s = new ConfigManager().loadAppSettings();
-  const teamKey = (req.query.teamKey as string) || s.teamKey;
+  const teamKey = normalizeTeamKeyInput(s.leagueKey, (req.query.teamKey as string) || s.teamKey);
   if (!teamKey) {
     res.status(400).json({ ok: false, error: 'Missing teamKey' });
     return;
@@ -439,7 +487,7 @@ app.get('/api/roster', async (req, res) => {
 
 app.get('/api/league', async (req, res) => {
   const s = new ConfigManager().loadAppSettings();
-  const leagueKey = (req.query.leagueKey as string) || s.leagueKey;
+  const leagueKey = normalizeLeagueKeyInput((req.query.leagueKey as string) || s.leagueKey);
   if (!leagueKey) {
     res.status(400).json({ ok: false, error: 'Missing leagueKey' });
     return;
@@ -626,8 +674,8 @@ app.post('/api/test/trade', async (req, res) => {
 app.get('/api/trades/incoming', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
-    const leagueKey = (req.query.leagueKey as string) || s.leagueKey;
-    const teamKey = (req.query.teamKey as string) || s.teamKey;
+    const leagueKey = normalizeLeagueKeyInput((req.query.leagueKey as string) || s.leagueKey);
+    const teamKey = normalizeTeamKeyInput(leagueKey || s.leagueKey, (req.query.teamKey as string) || s.teamKey);
     const debug = String(req.query.debug || '0') === '1';
     if (!leagueKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey' }); return; }
     const cm = new ConfigManager();
@@ -942,22 +990,52 @@ app.post('/api/pickups/apply', async (req, res) => {
     const league = await api.getLeague(leagueKey);
     const teamInfo = await api.getTeamInfo(teamKey);
     const available = await api.getFreeAgents(leagueKey, 50);
-    if (!Array.isArray(available) || available.length === 0) { res.status(400).json({ ok: false, error: 'No available players found' }); return; }
+    let usingWaiversFallback = false;
+    let waiversList: any[] = [];
+    if (!Array.isArray(available) || available.length === 0) {
+      // Fallback: if no immediate free agents, try waiver list and submit claims instead
+      waiversList = await api.getWaiverWirePlayers(leagueKey, 50);
+      if (!Array.isArray(waiversList) || waiversList.length === 0) {
+        // Enrich error with league timing hints
+        let startWeek: any = undefined, currentWeek: any = undefined, startDate: any = undefined;
+        try {
+          const fs = require('fs'); const path = require('path');
+          const p = path.join(process.cwd(), 'logs', 'last_free_agents_raw.json');
+          if (fs.existsSync(p)) {
+            const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+            const meta = raw?.data?.fantasy_content?.league?.[0];
+            startWeek = meta?.start_week; currentWeek = meta?.current_week; startDate = meta?.start_date;
+          }
+        } catch {}
+        res.status(400).json({ ok: false, error: 'No available players found', hint: 'league_window', startWeek, currentWeek, startDate });
+        return;
+      }
+      usingWaiversFallback = true;
+    }
 
     const context = { week: league.currentWeek, season: league.season, leagueSettings: league.settings } as any;
     const myEntries = await api.getTeamRosterWithSlots(teamKey);
     const myRoster = myEntries.map((e) => e.player);
-    let decision = await gemini.evaluateImmediatePickups(available, myRoster, Math.max(1, Math.min(5, max)), context);
-    // Ensure we don’t exceed max and strip any accidental bidAmount fields
-    decision = { ...decision, claims: (decision.claims || []).slice(0, Math.max(1, Math.min(5, max))).map((c: any) => ({ playerId: c.playerId, dropPlayerId: c.dropPlayerId, priority: c.priority, reasoning: c.reasoning })) } as any;
+    let decision: any;
+    if (!usingWaiversFallback) {
+      decision = await gemini.evaluateImmediatePickups(available, myRoster, Math.max(1, Math.min(5, max)), context);
+      // Ensure we don’t exceed max and strip any accidental bidAmount fields
+      decision = { ...decision, claims: (decision.claims || []).slice(0, Math.max(1, Math.min(5, max))).map((c: any) => ({ playerId: c.playerId, dropPlayerId: c.dropPlayerId, priority: c.priority, reasoning: c.reasoning })) } as any;
+    } else {
+      // Use waiver evaluation path when no FAs
+      const wdec = await gemini.evaluateWaiver(waiversList, { applyChanges: true }, Math.max(1, Math.min(5, max)), context);
+      decision = { ...wdec, claims: (wdec.claims || []).slice(0, Math.max(1, Math.min(5, max))).map((c: any) => ({ playerId: c.playerId, dropPlayerId: c.dropPlayerId, priority: c.priority, reasoning: c.reasoning })) } as any;
+    }
 
-    // Pre-check: ensure adds are truly free agents (eligible now)
-    try {
-      const faSet = new Set((available || []).map((p: any) => String(p.id)));
-      const filtered = (decision.claims || []).filter((c: any) => faSet.has(String(c.playerId)));
-      if (filtered.length === 0) { res.status(400).json({ ok: false, error: 'No eligible free agents to add', reason: 'not_free_agents' }); return; }
-      decision.claims = filtered;
-    } catch {}
+    // Pre-check: ensure adds are truly free agents when doing immediate pickups
+    if (!usingWaiversFallback) {
+      try {
+        const faSet = new Set((available || []).map((p: any) => String(p.id)));
+        const filtered = (decision.claims || []).filter((c: any) => faSet.has(String(c.playerId)));
+        if (filtered.length === 0) { res.status(400).json({ ok: false, error: 'No eligible free agents to add', reason: 'not_free_agents' }); return; }
+        decision.claims = filtered;
+      } catch {}
+    }
 
     // Determine if roster is full based on league rosterPositions (exclude IR slots)
     const rp: Record<string, number> = (league?.settings?.rosterPositions || {}) as any;
@@ -1069,10 +1147,27 @@ app.post('/api/pickups/apply', async (req, res) => {
         return;
       }
       try { console.log('[Pickups] decisionWithDrops (server final):', JSON.stringify(decisionWithDrops)); } catch {}
-      applied = await write.applyPickups(leagueKey, teamKey, decisionWithDrops);
+      if (!usingWaiversFallback) {
+        applied = await write.applyPickups(leagueKey, teamKey, decisionWithDrops);
+      } else {
+        applied = await write.applyWaivers(leagueKey, teamKey, decisionWithDrops);
+      }
       decision = decisionWithDrops;
     }
-    res.json({ ok: true, decision, applied, rosterFull });
+    if (!applied?.success) {
+      // Try to include Yahoo's last write error details for diagnostics
+      try {
+        const fs = require('fs'); const path = require('path');
+        const p = path.join(process.cwd(), 'logs', 'last_write_error.json');
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf8');
+          const lastError = JSON.parse(raw);
+          res.json({ ok: true, decision, applied, rosterFull, lastError, usingWaiversFallback });
+          return;
+        }
+      } catch {}
+    }
+    res.json({ ok: true, decision, applied, rosterFull, usingWaiversFallback });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
@@ -1136,8 +1231,8 @@ app.post('/api/gemini/preview', async (req, res) => {
   try {
     const type = String(req.body?.type || 'lineup');
     const s3 = new ConfigManager().loadAppSettings();
-    let leagueKey = req.body?.leagueKey || s3.leagueKey;
-    const teamKey = req.body?.teamKey || s3.teamKey;
+    let leagueKey = normalizeLeagueKeyInput(req.body?.leagueKey || s3.leagueKey);
+    const teamKey = normalizeTeamKeyInput(leagueKey || s3.leagueKey, req.body?.teamKey || s3.teamKey);
     const theirTeamKey = req.body?.theirTeamKey || '';
     const cm = new ConfigManager();
     const oauth = new YahooOAuthClient(cm);
@@ -1324,6 +1419,7 @@ app.get('/api/env', (_req, res) => {
       ok: true,
       leagueKey: s.leagueKey || null,
       teamKey: s.teamKey || null,
+      redirectUri: s.redirectUri || null,
       schedule: { enabled: s.scheduleEnabled, hour: s.scheduleHour, minute: s.scheduleMinute },
       features: {
         kickoffEnabled: !!s.kickoffEnabled,
@@ -1348,10 +1444,11 @@ app.post('/api/env', (req, res) => {
     const body = req.body || {};
     const cm = new ConfigManager();
     const s = cm.loadAppSettings();
-    const leagueKey = String(body.leagueKey || s.leagueKey || '');
-    const teamKey = String(body.teamKey || s.teamKey || '');
-    const updated = cm.saveAppSettings({ ...s, leagueKey, teamKey });
-    res.json({ ok: true, leagueKey: updated.leagueKey, teamKey: updated.teamKey });
+    const leagueKey = normalizeLeagueKeyInput(body.leagueKey || s.leagueKey || '');
+    const teamKey = normalizeTeamKeyInput(leagueKey, body.teamKey || s.teamKey || '');
+    const redirectUri = String(body.redirectUri || s.redirectUri || '');
+    const updated = cm.saveAppSettings({ ...s, leagueKey, teamKey, redirectUri });
+    res.json({ ok: true, leagueKey: updated.leagueKey, teamKey: updated.teamKey, redirectUri: updated.redirectUri });
   } catch (e) {
     res.status(400).json({ ok: false, error: (e as Error).message });
   }
@@ -1363,8 +1460,8 @@ app.post('/api/schedule', (req, res) => {
     const enabled = !!body.enabled;
     const hour = body.hour !== undefined ? parseInt(String(body.hour), 10) : appSettings.scheduleHour;
     const minute = body.minute !== undefined ? parseInt(String(body.minute), 10) : appSettings.scheduleMinute;
-    const leagueKey = body.leagueKey || appSettings.leagueKey;
-    const teamKey = body.teamKey || appSettings.teamKey;
+    const leagueKey = normalizeLeagueKeyInput(body.leagueKey || appSettings.leagueKey);
+    const teamKey = normalizeTeamKeyInput(leagueKey || appSettings.leagueKey, body.teamKey || appSettings.teamKey);
     if (enabled) {
       if (!leagueKey || !teamKey) {
         res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' });
@@ -1411,8 +1508,10 @@ app.get('/api/features', (_req, res) => {
 function resolveKeys(req: express.Request): { leagueKey: string; teamKey: string } {
   const s = new ConfigManager().loadAppSettings();
   const body: any = (req as any).body || {};
-  const leagueKey = String(body.leagueKey || req.query.leagueKey || s.leagueKey || '').trim();
-  const teamKey = String(body.teamKey || req.query.teamKey || s.teamKey || '').trim();
+  const rawLeague = String(body.leagueKey || req.query.leagueKey || s.leagueKey || '').trim();
+  const rawTeam = String(body.teamKey || req.query.teamKey || s.teamKey || '').trim();
+  const leagueKey = normalizeLeagueKeyInput(rawLeague);
+  const teamKey = normalizeTeamKeyInput(leagueKey || s.leagueKey, rawTeam);
   return { leagueKey, teamKey };
 }
 

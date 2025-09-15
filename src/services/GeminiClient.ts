@@ -14,7 +14,7 @@ type GeminiTextResponse = {
 
 export interface GeminiClientOptions {
   apiKey?: string;
-  model?: string; // e.g., gemini-2.5-flash
+  model?: string; // e.g., gemini-2.5-pro
   baseUrl?: string; // e.g., https://generativelanguage.googleapis.com/v1beta
 }
 
@@ -42,7 +42,7 @@ export class GeminiClient {
     if (!model) {
       try { const cm = new ConfigManager(); const creds = cm.loadGeminiCredentials(); model = creds?.model; } catch {}
     }
-    this.model = model || 'gemini-2.5-flash';
+    this.model = model || 'gemini-2.5-pro';
     this.baseUrl = (opts.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
     this.http = axios.create();
     this.quota = new GeminiQuota();

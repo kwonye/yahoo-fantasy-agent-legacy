@@ -244,7 +244,9 @@ export class YahooApiService {
     for (const url of urls) {
       try {
         const data = await this.getJson(url);
+        this.debugDump('last_waivers_raw.json', { url, data });
         const parsed = this.extractLeaguePlayers(data);
+        this.debugDump('last_waivers_parsed.json', parsed);
         if (parsed.length > 0) return parsed;
       } catch {
         // continue
@@ -263,7 +265,9 @@ export class YahooApiService {
     for (const url of urls) {
       try {
         const data = await this.getJson(url);
+        this.debugDump('last_free_agents_raw.json', { url, data });
         const parsed = this.extractLeaguePlayers(data);
+        this.debugDump('last_free_agents_parsed.json', parsed);
         if (parsed.length > 0) return parsed;
       } catch {
         // continue

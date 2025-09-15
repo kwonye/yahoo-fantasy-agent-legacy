@@ -97,10 +97,10 @@ export class YahooWriteAdapter {
     };
   }
 
-  async applyWaivers(leagueKey: string, decision: WaiverDecision): Promise<{ success: boolean }> {
+  async applyWaivers(leagueKey: string, myTeamKey: string, decision: WaiverDecision): Promise<{ success: boolean }> {
     const payload = this.buildWaiverPayload(decision);
     this.dump('waivers', payload);
-    const xml = this.buildWaiverXML(leagueKey, decision);
+    const xml = this.buildWaiverXML(leagueKey, myTeamKey, decision);
     this.dump('waivers.xml', xml);
     try {
       const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
@@ -228,22 +228,32 @@ export class YahooWriteAdapter {
     return `<fantasy_content><roster><assignments>${items}</assignments></roster></fantasy_content>`;
   }
 
-  buildWaiverXML(leagueKey: string, decision: WaiverDecision): string {
+  buildWaiverXML(leagueKey: string, myTeamKey: string, decision: WaiverDecision): string {
+    const gameKey = leagueKey.split('.l.')[0];
+    const normalizePlayerKey = (pid: string): string => {
+      const s = String(pid);
+      if (/^\d+\.p\.\d+$/.test(s) || s.includes('.p.')) return s;
+      if (/^\d+$/.test(s)) return `${gameKey}.p.${s}`;
+      return s;
+    };
     const items = decision.claims
-      .map((c) => `
+      .map((c) => {
+        const addKey = normalizePlayerKey(c.playerId);
+        const dropKey = c.dropPlayerId ? normalizePlayerKey(c.dropPlayerId) : undefined;
+        const bid = c.bidAmount !== undefined ? String(c.bidAmount) : '0';
+        return `
         <player>
+          <player_key>${escapeXml(addKey)}</player_key>
           <transaction_data>
             <type>add</type>
-            <league_key>${escapeXml(leagueKey)}</league_key>
-            <destination_type>waivers</destination_type>
-            ${c.bidAmount !== undefined ? `<faab_bid>${escapeXml(String(c.bidAmount))}</faab_bid>` : ''}
+            <destination_team_key>${escapeXml(myTeamKey)}</destination_team_key>
+            <faab_bid>${escapeXml(bid)}</faab_bid>
           </transaction_data>
-          <player_id>${escapeXml(c.playerId)}</player_id>
         </player>
-        ${c.dropPlayerId ? `<player><transaction_data><type>drop</type></transaction_data><player_id>${escapeXml(c.dropPlayerId)}</player_id></player>` : ''}
-      `)
+        ${dropKey ? `<player><player_key>${escapeXml(dropKey)}</player_key><transaction_data><type>drop</type><source_team_key>${escapeXml(myTeamKey)}</source_team_key></transaction_data></player>` : ''}`;
+      })
       .join('');
-    return `<fantasy_content><transaction><type>add/drop</type><players>${items}</players></transaction></fantasy_content>`;
+    return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><transactions><transaction><type>add</type><players>${items}</players></transaction></transactions></fantasy_content>`;
   }
 
   buildPickupXML(leagueKey: string, myTeamKey: string, decision: WaiverDecision): string {
@@ -269,7 +279,7 @@ export class YahooWriteAdapter {
         ${dropKey ? `<player><player_key>${escapeXml(dropKey)}</player_key><transaction_data><type>drop</type><source_team_key>${escapeXml(myTeamKey)}</source_team_key></transaction_data></player>` : ''}`;
       })
       .join('');
-    return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><transaction><type>add/drop</type><players>${items}</players></transaction></fantasy_content>`;
+    return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><transactions><transaction><type>add/drop</type><players>${items}</players></transaction></transactions></fantasy_content>`;
   }
 
   buildTradeXML(leagueKey: string, myTeamKey: string, decision: TradeDecision): string {

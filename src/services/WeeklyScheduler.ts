@@ -1,8 +1,9 @@
 export interface WeeklyOptions {
-  day: number; // 0=Sunday ... 6=Saturday (local)
+  day: number; // 0=Sunday ... 6=Saturday in provided time zone (or local if none)
   hour: number; // 0-23
   minute?: number; // 0-59
   runOnStart?: boolean;
+  timeZone?: string; // IANA time zone; defaults to local
 }
 
 export type WeeklyTask = () => Promise<void> | void;
@@ -28,20 +29,17 @@ export class WeeklyScheduler {
   }
 
   private scheduleNext() {
-    const now = new Date();
-    const next = new Date(now);
-    // Set to this week's target day/hour/minute
+    const { DateTime } = require('luxon');
+    const zone = this.opts.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const now = DateTime.now().setZone(zone);
     const targetDow = Math.max(0, Math.min(6, this.opts.day));
-    const currDow = now.getDay();
-    let delta = targetDow - currDow;
-    if (delta < 0) delta += 7; // next week
-    next.setDate(now.getDate() + delta);
-    next.setHours(this.opts.hour, this.opts.minute ?? 0, 0, 0);
+    const currDow0 = now.weekday % 7; // Luxon: Mon=1..Sun=7; convert to 0..6 (Sun=0)
+    let delta = (targetDow - currDow0 + 7) % 7;
+    let next = now.plus({ days: delta }).set({ hour: this.opts.hour, minute: this.opts.minute ?? 0, second: 0, millisecond: 0 });
     if (next <= now) {
-      // If today and time already passed, push one week
-      next.setDate(next.getDate() + 7);
+      next = next.plus({ days: 7 });
     }
-    const delay = next.getTime() - now.getTime();
+    const delay = Math.max(0, next.toMillis() - Date.now());
     this.timer = setTimeout(async () => {
       await this.safeRun();
       this.scheduleNext();
@@ -52,4 +50,3 @@ export class WeeklyScheduler {
     try { await this.task(); } catch {}
   }
 }
-

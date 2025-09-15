@@ -1,7 +1,8 @@
 export interface ScheduleOptions {
-  hour: number; // 0-23 local time
+  hour: number; // 0-23 in provided time zone (or local if none)
   minute?: number; // 0-59
   runOnStart?: boolean;
+  timeZone?: string; // IANA time zone (e.g., 'America/New_York'); defaults to local
 }
 
 export type Task = () => Promise<void> | void;
@@ -29,13 +30,15 @@ export class Scheduler {
   }
 
   private scheduleNext() {
-    const now = new Date();
-    const next = new Date(now);
-    next.setHours(this.opts.hour, this.opts.minute ?? 0, 0, 0);
+    // Compute next run in the specified time zone (defaults to local)
+    const { DateTime } = require('luxon');
+    const zone = this.opts.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const now = DateTime.now().setZone(zone);
+    let next = now.set({ hour: this.opts.hour, minute: this.opts.minute ?? 0, second: 0, millisecond: 0 });
     if (next <= now) {
-      next.setDate(next.getDate() + 1);
+      next = next.plus({ days: 1 });
     }
-    const delay = next.getTime() - now.getTime();
+    const delay = Math.max(0, next.toMillis() - Date.now());
     this.timer = setTimeout(async () => {
       await this.safeRun();
       this.scheduleNext();
@@ -50,4 +53,3 @@ export class Scheduler {
     }
   }
 }
-

@@ -343,7 +343,7 @@ export class BotController {
         const applyW = app.applyChanges === true;
         if (applyW) {
           try {
-            const out = await this.write.applyWaivers(this.leagueKey, res);
+            const out = await this.write.applyWaivers(this.leagueKey, this.teamKey, res);
             const decision: BotDecision = {
               id: `waivers-${Date.now()}`,
               type: DecisionType.WAIVER_CLAIM,
