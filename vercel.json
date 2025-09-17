@@ -1,6 +1,15 @@
 {
   "version": 2,
   "builds": [
-    { "src": "package.json", "use": "@vercel/next" }
+    { "src": "next.config.js", "use": "@vercel/next" }
+  ],
+  "routes": [
+    { "src": "^/api/(.*)$", "dest": "/api/$1" },
+    { "src": "/(.*)", "dest": "/$1" }
+  ],
+  "crons": [
+    { "path": "/api/bot/daily", "schedule": "0 13 * * *" },
+    { "path": "/api/bot/waivers", "schedule": "0 11 * * *" },
+    { "path": "/api/bot/kickoff", "schedule": "*/5 * * * *" }
   ]
 }

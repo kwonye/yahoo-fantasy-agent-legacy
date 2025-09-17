@@ -4,22 +4,26 @@
   "description": "Automated fantasy football bot using Yahoo Fantasy Sports API and Gemini AI",
   "main": "dist/index.js",
   "scripts": {
-    "build": "next build && tsc",
-    "vercel-build": "next build && npm run build",
-    "start": "next start",
     "dev": "next dev",
+    "build": "next build",
+    "vercel-build": "npm run build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
     "bot": "ts-node src/tools/runBot.ts once",
     "bot:schedule": "ts-node src/tools/runBot.ts schedule",
     "demo": "ts-node src/tools/demoYahoo.ts",
     "test": "jest",
     "test:watch": "jest --watch",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
-    "format": "prettier --write src/**/*.ts",
-  "web": "node dist/web/server.js > logs/server_output.log 2>&1",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
+    "format": "prettier --write 'src/**/*.{ts,tsx,html,json}'",
+    "web": "node dist/web/server.js > logs/server_output.log 2>&1",
     "web:https": "ENABLE_HTTPS=1 SSL_CERT_PATH=config/certs/cert.pem SSL_KEY_PATH=config/certs/key.pem ts-node src/web/server.ts",
     "web:dev": "nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"npx ts-node src/web/server.ts\"",
     "web:dev:https": "ENABLE_HTTPS=1 SSL_CERT_PATH=config/certs/cert.pem SSL_KEY_PATH=config/certs/key.pem nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"npx ts-node src/web/server.ts\""
+  },
+  "engines": {
+    "node": ">=18"
   },
   "vercel": {
     "build": {
