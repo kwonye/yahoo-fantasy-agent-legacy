@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { BotController } from '../../../src/controllers/BotController';
 import { ConfigManager } from '../../../src/services/ConfigManager';
+import { requireApiAuth } from '../../../src/lib/auth';
 
 // This route is triggered by Vercel Cron (see vercel.json) and can also be invoked manually.
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -9,6 +10,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).json({ ok: false, error: 'Method not allowed' });
     return;
   }
+  if (!requireApiAuth(req, res)) return;
   try {
     const cm = new ConfigManager();
     const app = cm.loadAppSettings();

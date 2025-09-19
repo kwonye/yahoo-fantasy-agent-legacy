@@ -1,8 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ConfigManager } from '../../../src/services/ConfigManager';
 import { GeminiClient } from '../../../src/services/GeminiClient';
+import { requireApiAuth } from '../../../src/lib/auth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!requireApiAuth(req, res)) return;
   try {
     const prompt = String(req.body?.prompt || '').trim();
     const cm = new ConfigManager();

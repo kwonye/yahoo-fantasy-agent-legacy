@@ -13,8 +13,10 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { ConfigManager } from '../../src/services/ConfigManager';
 import { YahooOAuthClient } from '../../src/services/YahooOAuthClient';
 import { YahooApiService } from '../../src/services/YahooApiService';
+import { requireApiAuth } from '../../src/lib/auth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!requireApiAuth(req, res)) return;
   try {
     const cm = new ConfigManager();
     const s = cm.loadAppSettings();

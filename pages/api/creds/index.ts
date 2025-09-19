@@ -1,9 +1,18 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ConfigManager } from '../../../src/services/ConfigManager';
+import { requireApiAuth } from '../../../src/lib/auth';
 
 function mask(s: string) { if (!s) return ''; return s.length <= 4 ? '*'.repeat(s.length) : `${s.slice(0,3)}***${s.slice(-2)}`; }
 
-export default function handler(_req: NextApiRequest, res: NextApiResponse) {
+export default function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!requireApiAuth(req, res)) return;
+
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+    return;
+  }
+
   try {
     const cm = new ConfigManager();
     let yahoo = null; let gemini = null; let source = null;

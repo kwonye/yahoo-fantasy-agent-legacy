@@ -164,6 +164,11 @@ export class BotController {
     await this.runRosterHygiene();
   }
 
+  // Manual trigger for immediate pickups
+  async runPickups(): Promise<void> {
+    await this.processPickups();
+  }
+
   // Expose trades automation (evaluate + respond) as a direct action
   async runTrades(): Promise<void> {
     await this.evaluateTrades();

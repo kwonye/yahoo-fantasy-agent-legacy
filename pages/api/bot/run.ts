@@ -1,8 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ConfigManager } from '../../../src/services/ConfigManager';
 import { BotController } from '../../../src/controllers/BotController';
+import { requireApiAuth } from '../../../src/lib/auth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!requireApiAuth(req, res)) return;
   try {
     const s = new ConfigManager().loadAppSettings();
     const leagueKey = String(req.body?.leagueKey || s.leagueKey || '');
