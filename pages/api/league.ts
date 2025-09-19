@@ -1,10 +1,9 @@
-function normalizeLeagueKeyInput(raw: string) { const r = String(raw || '').trim(); if (!r) return ''; if (/^nfl\.l\.\d+$/i.test(r)) return r; if (/^\d+$/.test(r)) return `nfl.l.${r}`; const m = r.match(/(\d{4,})/); if (m) return `nfl.l.${m[1]}`; return r; }
-
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ConfigManager } from '../../src/services/ConfigManager';
 import { YahooOAuthClient } from '../../src/services/YahooOAuthClient';
 import { YahooApiService } from '../../src/services/YahooApiService';
 import { requireApiAuth } from '../../src/lib/auth';
+import { normalizeLeagueKeyInput } from '../../src/lib/yahooKeys';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (!requireApiAuth(req, res)) return;

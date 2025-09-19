@@ -1,9 +1,11 @@
+import Head from 'next/head';
 import type { GetServerSideProps } from 'next';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import type { QuotaSnapshot } from '../src/lib/quota';
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { isAuthorized } from '../src/lib/auth';
 
-type AppPageProps = {
+export type AppPageProps = {
   initialQuota: QuotaSnapshot | null;
 };
 
@@ -26,1032 +28,818 @@ export const getServerSideProps: GetServerSideProps<AppPageProps> = async ({ req
   };
 };
 
-type AnyObj = Record<string, any>;
-
-type BadgeConfig = {
-  label: string;
-  value: ReactNode;
+const DEFAULT_FEATURES = {
+  kickoffEnabled: false,
+  irAutomationEnabled: false,
+  waiverAutomationEnabled: false,
+  pickupsAutomationEnabled: false,
+  tradesAutomationEnabled: false,
+  debugYahooEnabled: false,
+  applyChanges: false,
 };
 
-function fetchJson(url: string, opts?: RequestInit) {
-  const init: RequestInit = { credentials: 'include', ...opts };
-  const headers = new Headers(init.headers || {});
-  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
-  init.headers = headers;
+const DEFAULT_SCHEDULE = {
+  enabled: false,
+  hour: 9,
+  minute: 0,
+  waiverDay: 2,
+  waiverHour: 7,
+  waiverMinute: 0,
+};
 
-  return fetch(url, init).then(async response => {
-    const text = await response.text().catch(() => '');
-    try {
-      return JSON.parse(text);
-    } catch {
-      return text || {};
-    }
+type FeaturesState = typeof DEFAULT_FEATURES;
+
+type ScheduleState = typeof DEFAULT_SCHEDULE;
+
+type UpcomingTask = {
+  type: string;
+  runAtISO: string;
+  details?: string;
+  preMinutes?: number;
+};
+
+async function fetchJson<T = any>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    credentials: 'include',
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(init?.headers || {}),
+    },
   });
-}
-
-function jsonHighlightHtml(obj: unknown) {
+  const text = await response.text();
   try {
-    const json = JSON.stringify(obj ?? {}, null, 2);
-    const escape = (value: string) =>
-      value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    let safe = escape(json);
-    safe = safe.replace(
-      /(\"(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\\"])*\"\s*:)|(\"(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\\"])*\")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
-      (match, groupKey, groupString, groupBoolNull, groupNumber) => {
-        if (groupKey) return `<span class="json-key">${groupKey}</span>`;
-        if (groupString) return `<span class="json-string">${groupString}</span>`;
-        if (groupBoolNull) {
-          if (groupBoolNull === 'true' || groupBoolNull === 'false') {
-            return `<span class="json-boolean">${groupBoolNull}</span>`;
-          }
-          return `<span class="json-null">${groupBoolNull}</span>`;
-        }
-        if (groupNumber) return `<span class="json-number">${groupNumber}</span>`;
-        return match;
-      }
-    );
-    return safe;
-  } catch (error) {
-    return String(error);
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
   }
 }
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
-
-function formatDateTime(value: unknown) {
+function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
-  const date = new Date(String(value));
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return dateFormatter.format(date);
+  return date.toLocaleString();
 }
 
-const EMPTY_ARRAY: any[] = [];
+const relativeFormatter = typeof Intl !== 'undefined' ? new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }) : null;
 
-export default function AppPage({ initialQuota }: AppPageProps): JSX.Element {
-  const [health, setHealth] = useState<AnyObj | string>('Loading…');
-  const [metrics, setMetrics] = useState<AnyObj>({});
-  const [creds, setCreds] = useState<AnyObj>({});
-  const [activity, setActivity] = useState<any[]>(EMPTY_ARRAY);
-  const [geminiLogs, setGeminiLogs] = useState<any[]>(EMPTY_ARRAY);
-  const [roster, setRoster] = useState<any[]>(EMPTY_ARRAY);
-  const [leagueProfile, setLeagueProfile] = useState<AnyObj | null>(null);
-  const [trades, setTrades] = useState<any[]>(EMPTY_ARRAY);
-  const [quota, setQuota] = useState<AnyObj | null>(initialQuota);
-  const [env, setEnv] = useState<AnyObj>({});
-  const [isRefreshing, setIsRefreshing] = useState(false);
+function formatRelativeTime(targetISO: string) {
+  try {
+    const target = new Date(targetISO).getTime();
+    const now = Date.now();
+    const diffMs = target - now;
+    const diffMinutes = Math.round(diffMs / 60000);
+    if (!relativeFormatter) return `${diffMinutes} minutes`;
+    const absMinutes = Math.abs(diffMinutes);
+    if (absMinutes < 60) return relativeFormatter.format(diffMinutes, 'minute');
+    const diffHours = Math.round(diffMinutes / 60);
+    const absHours = Math.abs(diffHours);
+    if (absHours < 48) return relativeFormatter.format(diffHours, 'hour');
+    const diffDays = Math.round(diffHours / 24);
+    return relativeFormatter.format(diffDays, 'day');
+  } catch {
+    return '';
+  }
+}
+
+function maskValue(value?: string | null) {
+  if (!value) return '';
+  const str = String(value);
+  if (str.length <= 4) return '*'.repeat(str.length);
+  return `${str.slice(0, 3)}***${str.slice(-2)}`;
+}
+
+export default function AppPage({ initialQuota }: AppPageProps) {
+  const [health, setHealth] = useState<any>(null);
+  const [metrics, setMetrics] = useState<any>(null);
+  const [credentials, setCredentials] = useState<any>(null);
+  const [quota, setQuota] = useState<any>(initialQuota);
+  const [env, setEnv] = useState<{ leagueKey: string; teamKey: string; redirectUri?: string }>({ leagueKey: '', teamKey: '', redirectUri: '' });
+  const [schedule, setSchedule] = useState<ScheduleState>(DEFAULT_SCHEDULE);
+  const [features, setFeatures] = useState<FeaturesState>(DEFAULT_FEATURES);
+  const [featureDraft, setFeatureDraft] = useState<FeaturesState>(DEFAULT_FEATURES);
+  const [activity, setActivity] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [geminiLogs, setGeminiLogs] = useState<any[]>([]);
+  const [roster, setRoster] = useState<any[]>([]);
+  const [leagueProfile, setLeagueProfile] = useState<any>(null);
+  const [upcomingTasks, setUpcomingTasks] = useState<UpcomingTask[]>([]);
+  const [trades, setTrades] = useState<any[]>([]);
+  const [tradeBlock, setTradeBlock] = useState<{ needs?: string[]; surplus?: string[]; reasoning?: string; counts?: Record<string, number> } | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const [yClientId, setYClientId] = useState('');
-  const [yClientSecret, setYClientSecret] = useState('');
-  const [gApiKey, setGApiKey] = useState('');
-  const [gModel, setGModel] = useState('gemini-2.5-pro');
+  const [yahooClientId, setYahooClientId] = useState('');
+  const [yahooClientSecret, setYahooClientSecret] = useState('');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [geminiModel, setGeminiModel] = useState('gemini-2.5-pro');
   const [leagueKeyInput, setLeagueKeyInput] = useState('');
   const [teamKeyInput, setTeamKeyInput] = useState('');
   const [redirectUriInput, setRedirectUriInput] = useState('');
+  const [theirTeamNumber, setTheirTeamNumber] = useState('');
 
-  const refresh = useCallback(async () => {
+  const [yahooClientTouched, setYahooClientTouched] = useState(false);
+  const [yahooSecretTouched, setYahooSecretTouched] = useState(false);
+  const [geminiKeyTouched, setGeminiKeyTouched] = useState(false);
+  const [geminiModelTouched, setGeminiModelTouched] = useState(false);
+  const [leagueKeyTouched, setLeagueKeyTouched] = useState(false);
+  const [teamKeyTouched, setTeamKeyTouched] = useState(false);
+  const [redirectTouched, setRedirectTouched] = useState(false);
+
+  const [prompt, setPrompt] = useState('');
+  const [promptResult, setPromptResult] = useState('');
+  const [previewType, setPreviewType] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState('');
+
+  const [isSavingFeatures, setIsSavingFeatures] = useState(false);
+  const [isSendingPrompt, setIsSendingPrompt] = useState(false);
+
+  const leagueTeamDisplay = useMemo(() => {
+    const league = leagueKeyInput || env.leagueKey;
+    const team = teamKeyInput || env.teamKey;
+    return { league, team };
+  }, [leagueKeyInput, teamKeyInput, env.leagueKey, env.teamKey]);
+
+  const refreshAll = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [healthResp, credsResp, metricsResp, activityResp, geminiResp, envResp, quotaResp] = await Promise.all([
-        fetchJson('/api/health'),
-        fetchJson('/api/creds'),
-        fetchJson('/api/metrics'),
-        fetchJson('/api/activity'),
-        fetchJson('/api/gemini/logs'),
-        fetchJson('/api/env'),
-        fetchJson('/api/quota').catch(() => null),
-      ]);
+      const tasks: Array<[string, Promise<any>]> = [
+        ['health', fetchJson('/api/health').catch(() => null)],
+        ['metrics', fetchJson('/api/metrics').catch(() => null)],
+        ['creds', fetchJson('/api/creds').catch(() => null)],
+        ['yahooRaw', fetchJson('/api/creds/yahoo/raw').catch(() => null)],
+        ['geminiRaw', fetchJson('/api/creds/gemini/raw').catch(() => null)],
+        ['env', fetchJson('/api/env').catch(() => null)],
+        ['features', fetchJson('/api/features').catch(() => null)],
+        ['schedule', fetchJson('/api/schedule').catch(() => null)],
+        ['schedulePreview', fetchJson('/api/schedule/preview').catch(() => null)],
+        ['activity', fetchJson('/api/activity?limit=200').catch(() => null)],
+        ['geminiLogs', fetchJson('/api/gemini/logs').catch(() => null)],
+        ['roster', fetchJson('/api/roster').catch(() => null)],
+        ['leagueProfile', fetchJson('/api/league-config').catch(() => null)],
+        ['trades', fetchJson('/api/trades/incoming?debug=1').catch(() => null)],
+        ['tradeBlock', fetchJson('/api/trade-block').catch(() => null)],
+        ['quota', fetchJson('/api/quota').catch(() => null)],
+      ];
 
-      setHealth(healthResp);
-      setCreds(typeof credsResp === 'object' && credsResp !== null ? (credsResp as AnyObj) : {});
-      setMetrics(metricsResp && typeof metricsResp === 'object' && 'metrics' in (metricsResp as AnyObj)
-        ? ((metricsResp as AnyObj).metrics as AnyObj)
-        : {});
-      setActivity(Array.isArray(activityResp?.events) ? activityResp.events : EMPTY_ARRAY);
-      setGeminiLogs(Array.isArray(geminiResp?.logs) ? geminiResp.logs : EMPTY_ARRAY);
-      setEnv(typeof envResp === 'object' && envResp !== null ? (envResp as AnyObj) : {});
+      const results = await Promise.all(tasks.map(async ([key, promise]) => {
+        const value = await promise;
+        return [key, value] as [string, any];
+      }));
+      const map = Object.fromEntries(results) as Record<string, any>;
 
-      setQuota(prev => {
-        if (quotaResp && typeof quotaResp === 'object' && 'ok' in quotaResp && (quotaResp as AnyObj).ok) {
-          return quotaResp;
+      setHealth(map.health?.status ? map.health : map.health);
+      setMetrics(map.metrics?.metrics ?? map.metrics ?? null);
+      setCredentials(map.creds ?? null);
+      if (map.quota && map.quota.ok !== false) setQuota(map.quota);
+
+      if (map.env && map.env.ok !== false) {
+        const nextEnv = {
+          leagueKey: map.env.leagueKey || '',
+          teamKey: map.env.teamKey || '',
+          redirectUri: map.env.redirectUri || '',
+        };
+        setEnv(nextEnv);
+        if (!leagueKeyTouched) setLeagueKeyInput(nextEnv.leagueKey);
+        if (!teamKeyTouched) setTeamKeyInput(nextEnv.teamKey);
+        if (!redirectTouched) setRedirectUriInput(nextEnv.redirectUri || '');
+      }
+
+      if (map.features?.features) {
+        const merged = { ...DEFAULT_FEATURES, ...map.features.features } as FeaturesState;
+        setFeatures(merged);
+        setFeatureDraft(merged);
+      }
+
+      if (map.schedule?.schedule) {
+        setSchedule({ ...DEFAULT_SCHEDULE, ...map.schedule.schedule });
+      }
+
+      if (map.schedulePreview && map.schedulePreview.ok !== false) {
+        const tasksList: UpcomingTask[] = [];
+        const waiver = map.schedulePreview.waiver;
+        if (waiver?.enabled && waiver.nextRunISO) {
+          tasksList.push({ type: 'Waiver Processing', runAtISO: waiver.nextRunISO, details: waiver.source });
         }
-        return prev ?? initialQuota ?? null;
-      });
-
-      try {
-        const rawYahoo = await fetchJson('/api/creds/yahoo/raw');
-        if (rawYahoo && rawYahoo.ok) {
-          setYClientId(rawYahoo.clientId || '');
-          setYClientSecret(rawYahoo.clientSecret || '');
+        const kickoff = map.schedulePreview.kickoff;
+        if (kickoff?.enabled && Array.isArray(kickoff.upcoming)) {
+          kickoff.upcoming.slice(0, 10).forEach((item: any) => {
+            tasksList.push({
+              type: 'Kickoff Check',
+              runAtISO: item.runAtISO,
+              details: item.note ? `${item.note} • kickoff ${new Date(item.kickoffISO).toLocaleTimeString()}` : undefined,
+              preMinutes: item.preMinutes,
+            });
+          });
         }
-      } catch {}
+        tasksList.sort((a, b) => new Date(a.runAtISO).getTime() - new Date(b.runAtISO).getTime());
+        setUpcomingTasks(tasksList);
+      }
 
-      try {
-        const rawGemini = await fetchJson('/api/creds/gemini/raw');
-        if (rawGemini && rawGemini.ok) {
-          setGApiKey(rawGemini.apiKey || '');
-          setGModel(rawGemini.model || 'gemini-2.5-pro');
+      if (map.activity?.events) {
+        const events = Array.isArray(map.activity.events) ? map.activity.events : [];
+        setActivity(events.slice().reverse());
+        const applied = events.filter((ev: any) => ev?.type === 'action' && /applied/.test(String(ev.action || '')));
+        setTransactions(applied.slice(-20).reverse());
+      }
+
+      setGeminiLogs(Array.isArray(map.geminiLogs?.logs) ? map.geminiLogs.logs.slice().reverse() : []);
+      setRoster(Array.isArray(map.roster?.roster) ? map.roster.roster : []);
+      setLeagueProfile(map.leagueProfile?.profile ?? null);
+      setTrades(Array.isArray(map.trades?.trades) ? map.trades.trades : []);
+      setTradeBlock(map.tradeBlock?.ok ? map.tradeBlock : null);
+
+      if (map.creds?.creds) {
+        const masked = {
+          yahoo: map.creds.creds.yahoo,
+          gemini: map.creds.creds.gemini,
+        };
+        setCredentials(masked);
+      }
+
+      if (map.yahooRaw?.ok) {
+        if (!yahooClientTouched) setYahooClientId(map.yahooRaw.clientId || '');
+        if (!yahooSecretTouched) setYahooClientSecret(map.yahooRaw.clientSecret || '');
+      }
+      if (map.geminiRaw?.ok) {
+        if (!geminiKeyTouched) setGeminiApiKey(map.geminiRaw.apiKey || '');
+        if (!geminiModelTouched) setGeminiModel(map.geminiRaw.model || 'gemini-2.5-pro');
+      }
+
+      if (typeof window !== 'undefined') {
+        try {
+          const storedLeague = window.localStorage.getItem('leagueKey');
+          if (storedLeague) {
+            setLeagueKeyInput(storedLeague);
+            setLeagueKeyTouched(true);
+          }
+          const storedTeam = window.localStorage.getItem('teamKey');
+          if (storedTeam) {
+            setTeamKeyInput(storedTeam);
+            setTeamKeyTouched(true);
+          }
+        } catch {
+          // ignore storage errors
         }
-      } catch {}
-
-      try {
-        const rosterResp = await fetchJson('/api/roster');
-        setRoster(rosterResp?.roster || EMPTY_ARRAY);
-      } catch {}
-
-      try {
-        const profileResp = await fetchJson('/api/league-config');
-        setLeagueProfile(profileResp?.profile || null);
-      } catch {}
-
-      try {
-        const tradesResp = await fetchJson('/api/trades/incoming?debug=1');
-        setTrades(tradesResp?.trades || EMPTY_ARRAY);
-      } catch {}
+      }
 
       setLastUpdated(new Date().toISOString());
-    } catch (error) {
-      console.error('refresh failed', error);
     } finally {
       setIsRefreshing(false);
     }
-  }, [initialQuota]);
+  }, [geminiKeyTouched, geminiModelTouched, leagueKeyTouched, teamKeyTouched, yahooClientTouched, yahooSecretTouched]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function saveYahooCreds(event?: FormEvent) {
-    event?.preventDefault();
-    const response = await fetch('/api/creds/yahoo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientId: yClientId, clientSecret: yClientSecret }),
-    });
-    const result = await response.json().catch(() => ({ ok: false }));
-    alert(result.ok ? 'Yahoo credentials saved' : `Save failed: ${result.error || 'unknown'}`);
-    refresh();
-  }
+  const handleSaveYahoo = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = { clientId: yahooClientId, clientSecret: yahooClientSecret };
+    const result = await fetchJson('/api/creds/yahoo', { method: 'POST', body: JSON.stringify(body) });
+    if ((result as any)?.ok) {
+      alert('Yahoo credentials saved');
+      setYahooClientTouched(false);
+      setYahooSecretTouched(false);
+      refreshAll();
+    } else {
+      alert(`Save failed: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, [yahooClientId, yahooClientSecret, refreshAll]);
 
-  async function saveGemini(event?: FormEvent) {
-    event?.preventDefault();
-    const response = await fetch('/api/creds/gemini', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey: gApiKey, model: gModel }),
-    });
-    const result = await response.json().catch(() => ({ ok: false }));
-    alert(result.ok ? 'Gemini settings saved' : `Save failed: ${result.error || 'unknown'}`);
-    refresh();
-  }
+  const handleSaveGemini = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = { apiKey: geminiApiKey, model: geminiModel };
+    const result = await fetchJson('/api/creds/gemini', { method: 'POST', body: JSON.stringify(body) });
+    if ((result as any)?.ok) {
+      alert('Gemini settings saved');
+      setGeminiKeyTouched(false);
+      setGeminiModelTouched(false);
+      refreshAll();
+    } else {
+      alert(`Save failed: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, [geminiApiKey, geminiModel, refreshAll]);
 
-  async function saveEnv() {
-    const leagueKey = leagueKeyInput;
-    const teamKey = teamKeyInput;
-    const redirectUri = redirectUriInput;
-    const response = await fetch('/api/env', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leagueKey, teamKey, redirectUri }),
-    });
-    const result = await response.json().catch(() => ({ ok: false }));
-    alert(result.ok ? 'Keys saved' : `Save failed: ${result.error || 'unknown'}`);
-    localStorage.setItem('leagueKey', leagueKey);
-    localStorage.setItem('teamKey', teamKey);
-    refresh();
-  }
+  const handleSaveKeys = useCallback(async () => {
+    const body = { leagueKey: leagueKeyInput, teamKey: teamKeyInput, redirectUri: redirectUriInput };
+    const result = await fetchJson('/api/env', { method: 'POST', body: JSON.stringify(body) });
+    if ((result as any)?.ok) {
+      alert('Keys saved');
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('leagueKey', leagueKeyInput);
+          window.localStorage.setItem('teamKey', teamKeyInput);
+        } catch {}
+      }
+      refreshAll();
+    } else {
+      alert(`Save failed: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, [leagueKeyInput, teamKeyInput, redirectUriInput, refreshAll]);
 
-  async function runBot(event?: FormEvent) {
-    event?.preventDefault();
-    const response = await fetch('/api/bot/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leagueKey: leagueKeyInput || env.leagueKey, teamKey: teamKeyInput || env.teamKey }),
-    });
-    const result = await response.json().catch(() => ({ ok: false }));
-    alert(result.ok ? 'Bot run triggered' : `Run failed: ${result.error || 'unknown'}`);
-    refresh();
-  }
+  const handleRun = useCallback(async (endpoint: string, label: string) => {
+    const leagueKey = leagueTeamDisplay.league;
+    const teamKey = leagueTeamDisplay.team;
+    if (!leagueKey || !teamKey) {
+      alert('Set league and team keys first');
+      return;
+    }
+    const result = await fetchJson(endpoint, { method: 'POST', body: JSON.stringify({ leagueKey, teamKey }) }).catch(() => ({ ok: false }));
+    if ((result as any)?.ok) {
+      alert(`${label} completed`);
+      refreshAll();
+    } else {
+      alert(`${label} failed: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, [leagueTeamDisplay, refreshAll]);
 
-  const badges: BadgeConfig[] = useMemo(
-    () => [
-      { label: 'Mode', value: env?.applyChanges ? 'Live Writes' : 'Dry Run' },
-      { label: 'Yahoo', value: creds?.creds?.yahoo ? 'Connected' : 'Missing' },
-      { label: 'Gemini', value: creds?.creds?.gemini ? 'Connected' : 'Missing' },
-      {
-        label: 'Quota',
-        value: quota ? `${quota.remaining ?? '—'} / ${quota.limit ?? '—'}` : '—',
-      },
-    ],
-    [creds, env, quota]
-  );
+  const handleClearActivity = useCallback(async () => {
+    await fetchJson('/api/logs/clear', { method: 'POST' });
+    refreshAll();
+  }, [refreshAll]);
 
-  const activityRows = useMemo(() => activity.slice().reverse(), [activity]);
-  const geminiEntries = useMemo(() => geminiLogs.slice().reverse(), [geminiLogs]);
+  const handleClearGemini = useCallback(async () => {
+    await fetchJson('/api/gemini/clear', { method: 'POST' });
+    refreshAll();
+  }, [refreshAll]);
+
+  const handleSaveFeatures = useCallback(async () => {
+    setIsSavingFeatures(true);
+    try {
+      const result = await fetchJson('/api/features', { method: 'POST', body: JSON.stringify(featureDraft) });
+      if ((result as any)?.ok) {
+        alert('Automation settings saved');
+        setFeatures(result.features || featureDraft);
+      } else {
+        alert(`Save failed: ${(result as any)?.error || 'unknown'}`);
+      }
+    } finally {
+      setIsSavingFeatures(false);
+      refreshAll();
+    }
+  }, [featureDraft, refreshAll]);
+
+  const handleRespondTrade = useCallback(async (tradeId: string, accept: boolean) => {
+    const leagueKey = leagueTeamDisplay.league;
+    if (!leagueKey) { alert('Set league key first'); return; }
+    const result = await fetchJson('/api/trades/respond', { method: 'POST', body: JSON.stringify({ leagueKey, tradeId, accept }) });
+    if ((result as any)?.ok) {
+      alert(accept ? 'Trade accepted' : 'Trade declined');
+      refreshAll();
+    } else {
+      alert(`Action failed: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, [leagueTeamDisplay, refreshAll]);
+
+  const handleEvaluateTrade = useCallback(async (tradeId: string) => {
+    const leagueKey = leagueTeamDisplay.league;
+    const teamKey = leagueTeamDisplay.team;
+    if (!leagueKey || !teamKey) { alert('Set league and team keys first'); return; }
+    const result = await fetchJson('/api/trades/evaluate', { method: 'POST', body: JSON.stringify({ leagueKey, teamKey, tradeId }) });
+    if ((result as any)?.ok) {
+      const decision = (result as any).decision;
+      alert(`Gemini suggests: ${decision.shouldAccept ? 'ACCEPT' : 'DECLINE'}\nConfidence: ${Math.round((decision.confidence || 0) * 100)}%\nReasoning: ${decision.reasoning}`);
+    } else {
+      alert(`Evaluate failed: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, [leagueTeamDisplay]);
+
+  const handleRefreshTrades = useCallback(async () => {
+    const result = await fetchJson('/api/trades/incoming?debug=1').catch(() => ({ trades: [] }));
+    setTrades(Array.isArray((result as any).trades) ? (result as any).trades : []);
+  }, []);
+
+  const handleRefreshTradeBlock = useCallback(async () => {
+    const result = await fetchJson('/api/trade-block?force=1').catch(() => null);
+    if (result && (result as any).ok) setTradeBlock(result as any);
+    else alert(`Unable to refresh trade block: ${(result as any)?.error || 'unknown'}`);
+  }, []);
+
+  const handleSendPrompt = useCallback(async () => {
+    if (!prompt.trim()) return;
+    setIsSendingPrompt(true);
+    try {
+      const result = await fetchJson('/api/gemini/test', { method: 'POST', body: JSON.stringify({ prompt }) });
+      if ((result as any)?.ok) {
+        setPromptResult((result as any).response || '');
+        refreshAll();
+      } else {
+        setPromptResult(`Error: ${(result as any)?.error || 'unknown'}`);
+      }
+    } finally {
+      setIsSendingPrompt(false);
+    }
+  }, [prompt, refreshAll]);
+
+  const handlePreviewPrompt = useCallback(async (kind: 'lineup' | 'waivers' | 'trade') => {
+    const leagueKey = leagueTeamDisplay.league;
+    const teamKey = leagueTeamDisplay.team;
+    if (!leagueKey || !teamKey) { alert('Set league and team keys first'); return; }
+    const payload: Record<string, unknown> = { type: kind, leagueKey, teamKey };
+    if (kind === 'trade' && theirTeamNumber.trim()) payload.theirTeamNumber = Number(theirTeamNumber.trim());
+    const result = await fetchJson('/api/gemini/preview', { method: 'POST', body: JSON.stringify(payload) }).catch(() => ({ ok: false }));
+    if ((result as any)?.ok) {
+      setPreviewType(kind);
+      setPreviewText(`SYSTEM\n${(result as any).system}\n\nUSER\n${(result as any).user}`);
+    } else {
+      setPreviewType(kind);
+      setPreviewText(`Error: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, [leagueTeamDisplay, theirTeamNumber]);
+
+  const modeBadgeText = features.applyChanges ? 'Mode: Live Writes' : 'Mode: Dry Run';
+  const modeBadgeClass = features.applyChanges ? 'badge bg-danger' : 'badge bg-secondary';
+  const yahooBadgeClass = credentials?.yahoo ? 'badge bg-success' : 'badge bg-warning text-dark';
+  const geminiBadgeClass = credentials?.gemini ? 'badge bg-success' : 'badge bg-warning text-dark';
+  const yahooBadgeText = credentials?.yahoo ? `Yahoo: ${maskValue(credentials.yahoo.clientId)}` : 'Yahoo: Missing';
+  const geminiBadgeText = credentials?.gemini ? `Gemini: ${maskValue(credentials.gemini.apiKey)}` : 'Gemini: Missing';
+  const quotaBadgeText = quota ? `Quota: ${quota.remaining ?? '—'}/${quota.limit ?? '—'}` : 'Quota: —';
+  const quotaBadgeClass = quota && quota.remaining && quota.remaining > 0 ? 'badge bg-success' : 'badge bg-warning text-dark';
 
   return (
-    <div className="dashboard">
-      <header className="dashboard__header">
-        <div className="dashboard__title">Fantasy Football Bot</div>
-        <div className="dashboard__toolbar">
-          <button
-            className="btn btn-secondary"
-            onClick={refresh}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <div className="dashboard__badges">
-            {badges.map(badge => (
-              <div key={badge.label} className="badge">
-                <span className="badge__label">{badge.label}</span>
-                <span className="badge__value">{badge.value}</span>
+    <>
+      <Head>
+        <title>Fantasy Football Bot Dashboard</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet" />
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+      </Head>
+      <main className="dashboard-bg">
+        <nav className="navbar navbar-expand-lg mb-3 shadow-sm">
+          <div className="container-fluid justify-content-between">
+            <span className="navbar-brand fw-semibold">Fantasy Football Bot</span>
+            <div className="d-flex flex-wrap gap-2">
+              <span className={modeBadgeClass}>{modeBadgeText}</span>
+              <span className={yahooBadgeClass}>{yahooBadgeText}</span>
+              <span className={geminiBadgeClass}>{geminiBadgeText}</span>
+              <span className={quotaBadgeClass}>{quotaBadgeText}</span>
+            </div>
+          </div>
+        </nav>
+
+        <div className="container-fluid">
+          <div className="row g-3">
+            <div className="col-lg-4 col-md-6 col-12">
+              <div className="row g-3">
+                <div className="col-12"><DashboardCard title="Health"><pre className="mono mb-0">{health ? JSON.stringify(health, null, 2) : 'Loading…'}</pre></DashboardCard></div>
+                <div className="col-12"><DashboardCard title="Metrics"><pre className="mono mb-0">{metrics ? JSON.stringify(metrics, null, 2) : 'Loading…'}</pre></DashboardCard></div>
+                <div className="col-12">
+                  <DashboardCard title="Credentials">
+                    <div className="mb-2"><span className="badge bg-light text-dark me-2">Yahoo</span>{yahooBadgeText}</div>
+                    <div className="mb-3"><span className="badge bg-light text-dark me-2">Gemini</span>{geminiBadgeText}</div>
+                    <form className="mono" onSubmit={handleSaveYahoo}>
+                      <div className="mb-2">
+                        <label className="form-label">Yahoo Client ID</label>
+                        <input value={yahooClientId} onChange={(e) => { setYahooClientId(e.target.value); setYahooClientTouched(true); }} className="form-control form-control-sm" type="password" />
+                      </div>
+                      <div className="mb-2">
+                        <label className="form-label">Yahoo Client Secret</label>
+                        <input value={yahooClientSecret} onChange={(e) => { setYahooClientSecret(e.target.value); setYahooSecretTouched(true); }} className="form-control form-control-sm" type="password" />
+                      </div>
+                      <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-sm btn-secondary">Save Yahoo Creds</button>
+                        <a className="btn btn-sm btn-outline-primary" href="/auth/yahoo/start">Connect Yahoo</a>
+                      </div>
+                    </form>
+                    <hr />
+                    <form className="mono" onSubmit={handleSaveGemini}>
+                      <div className="mb-2">
+                        <label className="form-label">Gemini API Key</label>
+                        <input value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); setGeminiKeyTouched(true); }} className="form-control form-control-sm" type="password" />
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Gemini Model</label>
+                        <input value={geminiModel} onChange={(e) => { setGeminiModel(e.target.value); setGeminiModelTouched(true); }} className="form-control form-control-sm" />
+                      </div>
+                      <button type="submit" className="btn btn-sm btn-secondary">Save Gemini Settings</button>
+                    </form>
+                  </DashboardCard>
+                </div>
+                <div className="col-12">
+                  <DashboardCard title="League Setup">
+                    <div className="row g-2">
+                      <div className="col-12">
+                        <label className="form-label">League Key</label>
+                        <div className="input-group input-group-sm">
+                          <span className="input-group-text">nfl.l.</span>
+                          <input
+                            className="form-control"
+                            value={leagueKeyInput.replace(/^nfl\.l\./i, '')}
+                            onChange={(e) => {
+                              const raw = e.target.value.trim();
+                              if (!raw) {
+                                setLeagueKeyInput('');
+                              } else if (raw.startsWith('nfl.l.')) {
+                                setLeagueKeyInput(raw);
+                              } else {
+                                setLeagueKeyInput(`nfl.l.${raw}`);
+                              }
+                              setLeagueKeyTouched(true);
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="col-12">
+                        <label className="form-label">Team Key</label>
+                        <div className="input-group input-group-sm">
+                          <span className="input-group-text">.t.</span>
+                          <input
+                            className="form-control"
+                            value={teamKeyInput.replace(/^.*\.t\./i, '')}
+                            onChange={(e) => {
+                              const digits = (leagueKeyInput.match(/\d+/g) || []).join('');
+                              const base = digits ? `nfl.l.${digits}` : '';
+                              setTeamKeyInput(base ? `${base}.t.${e.target.value}` : e.target.value);
+                              setTeamKeyTouched(true);
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="col-12">
+                        <label className="form-label">Redirect URI</label>
+                        <input className="form-control form-control-sm" value={redirectUriInput} onChange={(e) => { setRedirectUriInput(e.target.value); setRedirectTouched(true); }} placeholder="https://localhost:3000/auth/callback" />
+                      </div>
+                    </div>
+                    <div className="d-flex gap-2 mt-3">
+                      <button className="btn btn-sm btn-secondary" onClick={handleSaveKeys} type="button">Save Keys</button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/run', 'Daily run')} type="button">Run Bot Now</button>
+                    </div>
+                  </DashboardCard>
+                </div>
+                <div className="col-12">
+                  <DashboardCard title="Automation">
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="feature-kickoff" checked={featureDraft.kickoffEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, kickoffEnabled: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="feature-kickoff">Enable Kickoff Checks</label>
+                    </div>
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="feature-ir" checked={featureDraft.irAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, irAutomationEnabled: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="feature-ir">Enable IR Hygiene</label>
+                    </div>
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="feature-waivers" checked={featureDraft.waiverAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, waiverAutomationEnabled: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="feature-waivers">Enable Auto Waivers</label>
+                    </div>
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="feature-pickups" checked={featureDraft.pickupsAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, pickupsAutomationEnabled: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="feature-pickups">Enable Auto Pickups</label>
+                    </div>
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="feature-trades" checked={featureDraft.tradesAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, tradesAutomationEnabled: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="feature-trades">Enable Auto Trades</label>
+                    </div>
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="feature-debug" checked={featureDraft.debugYahooEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, debugYahooEnabled: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="feature-debug">Enable Debug Logs</label>
+                    </div>
+                    <div className="form-check form-switch mb-3 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input className="form-check-input" type="checkbox" id="feature-apply" checked={featureDraft.applyChanges} onChange={(e) => setFeatureDraft({ ...featureDraft, applyChanges: e.target.checked })} />
+                        <label className="form-check-label ms-2" htmlFor="feature-apply">Apply Changes</label>
+                      </div>
+                      <span className="badge bg-warning text-dark">⚠️ Live Mode</span>
+                    </div>
+                    <button className="btn btn-sm btn-outline-success" disabled={isSavingFeatures} onClick={handleSaveFeatures} type="button">{isSavingFeatures ? 'Saving…' : 'Save Settings'}</button>
+                  </DashboardCard>
+                </div>
+                <div className="col-12">
+                  <DashboardCard title="Quick Actions">
+                    <div className="d-flex flex-column gap-2">
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/kickoff', 'Kickoff check')} type="button">Run Kickoff Check</button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/ir', 'IR hygiene')} type="button">Run IR Hygiene</button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/waivers', 'Waivers')} type="button">Run Waivers</button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/pickups', 'Pickups')} type="button">Run Pickups</button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/trades', 'Trades')} type="button">Run Trades</button>
+                    </div>
+                  </DashboardCard>
+                </div>
               </div>
-            ))}
+            </div>
+
+            <div className="col-lg-8 col-md-6 col-12">
+              <div className="row g-3">
+                <div className="col-12">
+                  <DashboardCard title="Recent Activity" subtitle={lastUpdated ? `Last updated ${formatDateTime(lastUpdated)}` : undefined} actions={
+                    <div className="d-flex gap-2">
+                      <button className="btn btn-sm btn-outline-secondary" onClick={refreshAll} disabled={isRefreshing}>{isRefreshing ? 'Refreshing…' : 'Refresh'}</button>
+                      <button className="btn btn-sm btn-outline-danger" onClick={handleClearActivity}>Clear Activity</button>
+                    </div>
+                  }>
+                    <div className="table-responsive" style={{ maxHeight: 320 }}>
+                      <table className="table table-sm table-striped mono">
+                        <thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead>
+                        <tbody>
+                          {activity.length === 0 ? (
+                            <tr><td colSpan={3} className="text-center text-muted">No activity yet.</td></tr>
+                          ) : activity.map((event, idx) => (
+                            <tr key={idx}>
+                              <td>{formatDateTime(event.ts || event.time)}</td>
+                              <td>{event.type || 'log'}</td>
+                              <td><code>{JSON.stringify(event.decision || event.action || event.error || event.details || event.meta || event)}</code></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </DashboardCard>
+                </div>
+
+                <div className="col-12">
+                  <DashboardCard title="Gemini Activity" actions={
+                    <div className="d-flex gap-2">
+                      <button className="btn btn-sm btn-outline-secondary" onClick={refreshAll}>Refresh</button>
+                      <button className="btn btn-sm btn-outline-danger" onClick={handleClearGemini}>Clear</button>
+                    </div>
+                  }>
+                    <div className="gemini-log">
+                      {geminiLogs.length === 0 ? (
+                        <div className="text-muted">No logged Gemini conversations yet.</div>
+                      ) : geminiLogs.map((item, idx) => (
+                        <div className="mb-3" key={idx}>
+                          <div className="text-muted small">{formatDateTime(item.ts)}</div>
+                          <div><strong>system</strong>: {item.system}</div>
+                          <div><strong>user</strong>: {item.user}</div>
+                          <div><strong>assistant</strong>: {item.response}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </DashboardCard>
+                </div>
+
+                <div className="col-12">
+                  <DashboardCard title="Ask Gemini">
+                    <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
+                      <div className="input-group input-group-sm" style={{ maxWidth: 640 }}>
+                        <span className="input-group-text">Prompt</span>
+                        <input className="form-control" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Gemini..." />
+                        <button className="btn btn-primary" type="button" onClick={handleSendPrompt} disabled={isSendingPrompt}>{isSendingPrompt ? 'Sending…' : 'Send'}</button>
+                      </div>
+                      <button className="btn btn-sm btn-outline-primary" type="button" onClick={() => handlePreviewPrompt('lineup')}>Preview lineup prompt</button>
+                      <button className="btn btn-sm btn-outline-secondary" type="button" onClick={() => handlePreviewPrompt('waivers')}>Preview waivers prompt</button>
+                      <button className="btn btn-sm btn-outline-secondary" type="button" onClick={() => handlePreviewPrompt('trade')}>Preview trade prompt</button>
+                    </div>
+                    <div className="row g-2">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label small">Opponent Team #</label>
+                        <input className="form-control form-control-sm" type="number" min={1} max={20} value={theirTeamNumber} onChange={(e) => setTheirTeamNumber(e.target.value)} />
+                      </div>
+                    </div>
+                    {promptResult ? <pre className="mono mt-3">{promptResult}</pre> : null}
+                    {previewType ? <pre className="mono mt-3">{previewText}</pre> : null}
+                  </DashboardCard>
+                </div>
+
+                <div className="col-12">
+                  <DashboardCard title="Current Roster">
+                    <div className="table-responsive" style={{ maxHeight: 320 }}>
+                      <table className="table table-sm table-striped mono">
+                        <thead><tr><th>Slot</th><th>Pos</th><th>Player</th><th>Team</th><th>Status</th></tr></thead>
+                        <tbody>
+                          {roster.length === 0 ? (
+                            <tr><td colSpan={5} className="text-center text-muted">Roster not loaded.</td></tr>
+                          ) : roster.map((entry, idx) => (
+                            <tr key={idx}>
+                              <td>{entry.slot || '—'}</td>
+                              <td>{entry.player?.position}</td>
+                              <td>{entry.player?.name}</td>
+                              <td>{entry.player?.team}</td>
+                              <td>{entry.player?.status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </DashboardCard>
+                </div>
+
+                <div className="col-12">
+                  <DashboardCard title="League Profile">
+                    <pre className="mono mb-0" style={{ maxHeight: 320, overflow: 'auto' }}>{leagueProfile ? JSON.stringify(leagueProfile, null, 2) : 'No profile loaded.'}</pre>
+                  </DashboardCard>
+                </div>
+
+                <div className="col-12">
+                  <DashboardCard title="Upcoming Tasks">
+                    <div className="table-responsive">
+                      <table className="table table-sm table-striped">
+                        <thead><tr><th>Action</th><th>Scheduled Time</th><th>Details</th></tr></thead>
+                        <tbody>
+                          {upcomingTasks.length === 0 ? (
+                            <tr><td colSpan={3} className="text-center text-muted">No scheduled tasks</td></tr>
+                          ) : upcomingTasks.map((task, idx) => (
+                            <tr key={idx}>
+                              <td><span className="badge bg-primary">{task.type}</span></td>
+                              <td>
+                                <div className="fw-semibold">{formatDateTime(task.runAtISO)}</div>
+                                <div className="text-muted small">{formatRelativeTime(task.runAtISO)}</div>
+                              </td>
+                              <td className="small">{task.preMinutes ? `T-${task.preMinutes}m` : ''} {task.details}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </DashboardCard>
+                </div>
+
+                <div className="col-12">
+                  <DashboardCard title="Incoming Trades" actions={<div className="d-flex gap-2"><button className="btn btn-sm btn-outline-secondary" onClick={handleRefreshTrades}>Refresh</button><button className="btn btn-sm btn-outline-secondary" onClick={handleRefreshTradeBlock}>Refresh Trade Block</button></div>}>
+                    <div className="table-responsive">
+                      <table className="table table-sm table-striped mono">
+                        <thead><tr><th>ID</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody>
+                          {trades.length === 0 ? (
+                            <tr><td colSpan={3} className="text-center text-muted">No pending trades.</td></tr>
+                          ) : trades.map((trade, idx) => (
+                            <tr key={idx}>
+                              <td>{trade.id}</td>
+                              <td>{trade.status || 'pending'}</td>
+                              <td className="d-flex flex-wrap gap-1">
+                                <button className="btn btn-sm btn-outline-secondary" onClick={() => alert(JSON.stringify(trade, null, 2))} type="button">View</button>
+                                <button className="btn btn-sm btn-outline-primary" onClick={() => handleEvaluateTrade(trade.id)} type="button">Evaluate</button>
+                                <button className="btn btn-sm btn-outline-success" onClick={() => handleRespondTrade(trade.id, true)} type="button">Accept</button>
+                                <button className="btn btn-sm btn-outline-danger" onClick={() => handleRespondTrade(trade.id, false)} type="button">Decline</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-3">
+                      <h6 className="fw-semibold">Trade Block</h6>
+                      {tradeBlock ? (
+                        <pre className="mono mb-0" style={{ maxHeight: 200, overflow: 'auto' }}>{JSON.stringify({ needs: tradeBlock.needs || [], surplus: tradeBlock.surplus || [], reasoning: tradeBlock.reasoning || '', counts: tradeBlock.counts || {} }, null, 2)}</pre>
+                      ) : (
+                        <div className="text-muted">Trade block not available.</div>
+                      )}
+                    </div>
+                  </DashboardCard>
+                </div>
+
+                <div className="col-12">
+                  <DashboardCard title="Transactions Summary">
+                    <div className="table-responsive" style={{ maxHeight: 240 }}>
+                      <table className="table table-sm table-striped mono">
+                        <thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead>
+                        <tbody>
+                          {transactions.length === 0 ? (
+                            <tr><td colSpan={3} className="text-center text-muted">No recent transactions</td></tr>
+                          ) : transactions.map((tx, idx) => (
+                            <tr key={idx}>
+                              <td>{formatDateTime(tx.ts)}</td>
+                              <td>{tx.action}</td>
+                              <td><code>{JSON.stringify(tx.details || tx.meta || {})}</code></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </DashboardCard>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </header>
-
-      <div className="dashboard__body">
-        <aside className="dashboard__sidebar">
-          <Card title="System Health">
-            <JsonPreview value={health} emptyLabel="No status reported yet." />
-          </Card>
-
-          <Card title="Metrics">
-            <JsonPreview value={metrics} emptyLabel="No metrics available." />
-          </Card>
-
-          <Card title="Gemini Quota">
-            <JsonPreview
-              value={quota ? {
-                limit: quota.limit,
-                used: quota.used,
-                remaining: quota.remaining,
-                resetsAt: quota.resetsAt,
-              } : {}}
-              emptyLabel="Quota data unavailable."
-            />
-          </Card>
-
-          <Card title="Credentials">
-            <JsonPreview
-              value={{
-                yahoo: creds?.creds?.yahoo || null,
-                gemini: creds?.creds?.gemini || null,
-              }}
-              emptyLabel="No credentials stored."
-            />
-            <form onSubmit={saveYahooCreds} className="form">
-              <Field label="Yahoo Client ID">
-                <input value={yClientId} onChange={event => setYClientId(event.target.value)} />
-              </Field>
-              <Field label="Yahoo Client Secret">
-                <input value={yClientSecret} onChange={event => setYClientSecret(event.target.value)} />
-              </Field>
-              <div className="form__actions">
-                <button type="submit" className="btn btn-primary btn-sm">Save Yahoo Creds</button>
-                <a className="btn btn-outline btn-sm" href="/auth/yahoo/start">Connect Yahoo</a>
-              </div>
-            </form>
-            <form onSubmit={saveGemini} className="form">
-              <Field label="Gemini API Key">
-                <input value={gApiKey} onChange={event => setGApiKey(event.target.value)} />
-              </Field>
-              <Field label="Gemini Model">
-                <input value={gModel} onChange={event => setGModel(event.target.value)} />
-              </Field>
-              <div className="form__actions">
-                <button type="submit" className="btn btn-primary btn-sm">Save Gemini Settings</button>
-              </div>
-            </form>
-          </Card>
-
-          <Card title="League Setup">
-            <form onSubmit={event => { event.preventDefault(); runBot(); }} className="form">
-              <Field label="League Key">
-                <input
-                  value={leagueKeyInput}
-                  onChange={event => setLeagueKeyInput(event.target.value)}
-                  placeholder="nfl.l.123456"
-                />
-              </Field>
-              <Field label="Team Key">
-                <input
-                  value={teamKeyInput}
-                  onChange={event => setTeamKeyInput(event.target.value)}
-                  placeholder="team key or number"
-                />
-              </Field>
-              <Field label="Redirect URI">
-                <input
-                  value={redirectUriInput}
-                  onChange={event => setRedirectUriInput(event.target.value)}
-                  placeholder="https://example.com/callback"
-                />
-              </Field>
-              <div className="form__actions">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={saveEnv}>Save Keys</button>
-                <button type="submit" className="btn btn-outline btn-sm">Run Bot Now</button>
-              </div>
-            </form>
-          </Card>
-        </aside>
-
-        <section className="dashboard__content">
-          <Card
-            title="Recent Activity"
-            subtitle={lastUpdated ? `Last updated ${formatDateTime(lastUpdated)}` : undefined}
-            actions={
-              <div className="card__actions">
-                <button className="btn btn-outline btn-sm" onClick={refresh} disabled={isRefreshing}>
-                  Refresh
-                </button>
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={async () => {
-                    await fetch('/api/logs/clear', { method: 'POST' });
-                    refresh();
-                  }}
-                >
-                  Clear Logs
-                </button>
-              </div>
-            }
-          >
-            {activityRows.length === 0 ? (
-              <EmptyState message="No activity yet." />
-            ) : (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Type</th>
-                      <th>Details</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activityRows.map((event, index) => (
-                      <tr key={index}>
-                        <td>{formatDateTime(event.ts || event.time)}</td>
-                        <td>{event.type || 'log'}</td>
-                        <td>
-                          <code>{JSON.stringify(event.decision || event.error || event.meta || event)}</code>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
-          <Card title="Gemini Activity">
-            {geminiEntries.length === 0 ? (
-              <EmptyState message="No logged Gemini conversations yet." />
-            ) : (
-              <div className="timeline">
-                {geminiEntries.map((item: any, index: number) => (
-                  <article key={index} className="timeline__item">
-                    <div className="timeline__timestamp">{formatDateTime(item.ts)}</div>
-                    <dl>
-                      <dt>system</dt>
-                      <dd>{String(item.system || '')}</dd>
-                      <dt>user</dt>
-                      <dd>{String(item.user || '')}</dd>
-                      <dt>assistant</dt>
-                      <dd>{String(item.response || '')}</dd>
-                    </dl>
-                  </article>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card title="Ask Gemini">
-            <GeminiTester onDone={refresh} />
-          </Card>
-
-          <Card title="Current Roster">
-            {roster.length === 0 ? (
-              <EmptyState message="Roster not loaded." />
-            ) : (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Slot</th>
-                      <th>Pos</th>
-                      <th>Player</th>
-                      <th>Team</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roster.map((entry, index) => (
-                      <tr key={index}>
-                        <td>{entry.slot || '—'}</td>
-                        <td>{entry.player?.position || ''}</td>
-                        <td>{entry.player?.name || ''}</td>
-                        <td>{entry.player?.team || ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
-          <Card title="League Profile">
-            <JsonPreview value={leagueProfile || {}} emptyLabel="League profile not loaded." />
-          </Card>
-
-          <Card title="Incoming Trades">
-            {trades.length === 0 ? (
-              <EmptyState message="No incoming trades at the moment." />
-            ) : (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trades.map((trade: any, index: number) => (
-                      <tr key={index}>
-                        <td>{trade.id}</td>
-                        <td>{trade.status}</td>
-                        <td className="table-actions">
-                          <button
-                            className="btn btn-outline btn-sm"
-                            onClick={() => alert(JSON.stringify(trade, null, 2))}
-                          >
-                            View
-                          </button>
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={async () => {
-                              const response = await fetch('/api/trades/evaluate', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  leagueKey: leagueKeyInput || env.leagueKey,
-                                  teamKey: teamKeyInput || env.teamKey,
-                                  tradeId: trade.id,
-                                }),
-                              });
-                              const result = await response.json();
-                              alert(
-                                result.ok
-                                  ? `Gemini suggests: ${result.decision?.shouldAccept ? 'ACCEPT' : 'DECLINE'}`
-                                  : `Error: ${result.error}`
-                              );
-                            }}
-                          >
-                            Evaluate
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        </section>
-      </div>
+      </main>
 
       <style jsx global>{`
-        :root {
-          color-scheme: dark;
-          --bg: #0f172a;
-          --bg-panel: #111c33;
-          --bg-panel-alt: #12213f;
-          --border: rgba(148, 163, 184, 0.2);
-          --text: #f1f5f9;
-          --text-muted: #94a3b8;
-          --primary: #7c3aed;
-          --primary-dark: #5b21b6;
-          --danger: #ef4444;
-          --success: #22c55e;
-          font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        }
-
-        body {
-          margin: 0;
-          background: linear-gradient(135deg, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.85) 55%, rgba(45, 36, 73, 0.9) 100%);
-          color: var(--text);
-          min-height: 100vh;
-        }
-
-        a {
-          color: var(--primary);
-        }
-
-        .dashboard {
-          min-height: 100vh;
-          padding: 24px;
-          box-sizing: border-box;
-          display: flex;
-          flex-direction: column;
-          gap: 24px;
-        }
-
-        .dashboard__header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 16px;
-        }
-
-        .dashboard__title {
-          font-size: 1.75rem;
-          font-weight: 700;
-        }
-
-        .dashboard__toolbar {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-
-        .dashboard__badges {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .badge {
-          background: var(--bg-panel);
-          border: 1px solid var(--border);
-          padding: 8px 12px;
-          border-radius: 999px;
-          display: flex;
-          gap: 6px;
-          align-items: center;
-          font-size: 0.85rem;
-        }
-
-        .badge__label {
-          color: var(--text-muted);
-        }
-
-        .badge__value {
-          font-weight: 600;
-        }
-
-        .dashboard__body {
-          display: grid;
-          grid-template-columns: minmax(280px, 360px) 1fr;
-          gap: 24px;
-          align-items: flex-start;
-        }
-
-        @media (max-width: 1080px) {
-          .dashboard__body {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        .dashboard__sidebar,
-        .dashboard__content {
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-        }
-
-        .card {
-          background: radial-gradient(circle at top left, rgba(124, 58, 237, 0.12), transparent 70%), var(--bg-panel);
-          border: 1px solid var(--border);
-          border-radius: 18px;
-          padding: 20px;
-          box-shadow: 0 18px 34px rgba(15, 23, 42, 0.45);
-        }
-
-        .card__header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 16px;
-          margin-bottom: 16px;
-        }
-
-        .card__title {
-          font-size: 1.1rem;
-          font-weight: 600;
-        }
-
-        .card__subtitle {
-          color: var(--text-muted);
-          font-size: 0.9rem;
-          margin-top: 4px;
-        }
-
-        .card__actions {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .card__body {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .json-block {
-          background: var(--bg-panel-alt);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          padding: 12px;
-          max-height: 280px;
-          overflow: auto;
-        }
-
-        .json-block pre {
-          margin: 0;
-          white-space: pre-wrap;
-          word-break: break-word;
-          font-family: 'SFMono-Regular', ui-monospace, Menlo, Monaco, 'Cascadia Mono', 'Segoe UI Mono', monospace;
-          font-size: 0.85rem;
-          line-height: 1.4;
-        }
-
-        .json-block--empty {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 80px;
-          color: var(--text-muted);
-          text-align: center;
-          font-size: 0.9rem;
-          padding: 12px 16px;
-        }
-
-        .json-key { color: #a78bfa; }
-        .json-string { color: #f0abfc; }
-        .json-number { color: #facc15; }
-        .json-boolean { color: #34d399; }
-        .json-null { color: var(--text-muted); }
-
-        .btn {
-          border: none;
-          border-radius: 999px;
-          padding: 10px 16px;
-          font-weight: 600;
-          font-size: 0.9rem;
-          cursor: pointer;
-          background: rgba(255, 255, 255, 0.05);
-          color: var(--text);
-          transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
-        }
-
-        .btn:hover:not(:disabled) {
-          transform: translateY(-1px);
-          background: rgba(255, 255, 255, 0.12);
-          box-shadow: 0 8px 18px rgba(15, 23, 42, 0.3);
-        }
-
-        .btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-          transform: none;
-        }
-
-        .btn-sm {
-          padding: 6px 12px;
-          font-size: 0.82rem;
-        }
-
-        .btn-primary {
-          background: var(--primary);
-        }
-
-        .btn-primary:hover:not(:disabled) {
-          background: var(--primary-dark);
-        }
-
-        .btn-secondary {
-          background: rgba(148, 163, 184, 0.15);
-        }
-
-        .btn-outline {
-          background: transparent;
-          border: 1px solid rgba(148, 163, 184, 0.4);
-        }
-
-        .btn-outline:hover:not(:disabled) {
-          border-color: rgba(148, 163, 184, 0.8);
-        }
-
-        .btn-danger {
-          background: var(--danger);
-        }
-
-        .btn-danger:hover:not(:disabled) {
-          background: #dc2626;
-        }
-
-        .form {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          margin-top: 12px;
-        }
-
-        .form__field {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          margin: 0;
-          font-size: 0.85rem;
-          font-weight: 600;
-          color: var(--text-muted);
-        }
-
-        .form__field span {
-          margin: 0;
-        }
-
-        .form input,
-        .form textarea {
-          width: 100%;
-          border-radius: 10px;
-          padding: 0.85rem 1rem;
-          border: 1px solid rgba(148, 163, 184, 0.32);
-          background: rgba(15, 23, 42, 0.45);
-          color: var(--text);
-          font-size: 0.95rem;
-          font-family: inherit;
-          line-height: 1.4;
-          box-sizing: border-box;
-          transition: border-color 0.15s ease, box-shadow 0.15s ease;
-        }
-
-        .form input:focus,
-        .form textarea:focus {
-          outline: none;
-          border-color: rgba(124, 58, 237, 0.7);
-          box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.25);
-        }
-
-        .form__actions {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .table-wrapper {
-          border-radius: 12px;
-          border: 1px solid var(--border);
-          overflow: hidden;
-          background: var(--bg-panel-alt);
-        }
-
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.88rem;
-        }
-
-        thead {
-          background: rgba(124, 58, 237, 0.18);
-        }
-
-        th,
-        td {
-          padding: 10px 12px;
-          text-align: left;
-          border-bottom: 1px solid rgba(15, 23, 42, 0.35);
-        }
-
-        tbody tr:nth-child(even) {
-          background: rgba(255, 255, 255, 0.03);
-        }
-
-        tbody tr:hover {
-          background: rgba(124, 58, 237, 0.12);
-        }
-
-        code {
-          font-family: 'SFMono-Regular', ui-monospace, Menlo, Monaco, 'Cascadia Mono', 'Segoe UI Mono', monospace;
-          white-space: pre-wrap;
-        }
-
-        .timeline {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          max-height: 320px;
-          overflow-y: auto;
-          padding-right: 8px;
-        }
-
-        .timeline__item {
-          border-left: 2px solid rgba(124, 58, 237, 0.4);
-          padding-left: 12px;
-        }
-
-        .timeline__timestamp {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          margin-bottom: 6px;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-
-        .timeline dl {
-          margin: 0;
-          display: grid;
-          grid-template-columns: 80px 1fr;
-          gap: 6px 12px;
-          font-size: 0.88rem;
-        }
-
-        .timeline dt {
-          color: var(--text-muted);
-          text-transform: uppercase;
-          font-weight: 600;
-          letter-spacing: 0.05em;
-        }
-
-        .timeline dd {
-          margin: 0;
-          line-height: 1.4;
-        }
-
-        .table-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .empty-state {
-          padding: 36px;
-          text-align: center;
-          color: var(--text-muted);
-          background: rgba(255, 255, 255, 0.02);
-          border-radius: 12px;
-          border: 1px dashed rgba(148, 163, 184, 0.25);
-        }
-
-        .empty-state strong {
-          display: block;
-          font-size: 1rem;
-          color: var(--text);
-        }
+        body { background: #f7f1ff; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        .dashboard-bg { padding: 16px; }
+        .navbar { background: linear-gradient(180deg, #faf5ff, #fff0f7); border-radius: 12px; border: 1px solid #eadcf8; }
+        .navbar-brand { color: #7c3aed; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; }
+        .badge { font-weight: 600; }
+        .card { background: #ffffff; border: 1px solid #eadcf8; box-shadow: 0 6px 18px rgba(167,139,250,0.08); border-radius: 14px; }
+        .card-header { background: linear-gradient(180deg, #faf5ff, #fff0f7); border-bottom: 1px solid #eadcf8; font-weight: 600; font-size: 14px; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+        .gemini-log { max-height: 260px; overflow: auto; }
       `}</style>
-    </div>
+    </>
   );
 }
 
-function Card({ title, subtitle, actions, children }: { title: string; subtitle?: string; actions?: ReactNode; children: ReactNode; }) {
+type DashboardCardProps = {
+  title: string;
+  subtitle?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+};
+
+function DashboardCard({ title, subtitle, actions, children }: DashboardCardProps) {
   return (
-    <section className="card">
-      <div className="card__header">
+    <div className="card">
+      <div className="card-header d-flex justify-content-between align-items-center">
         <div>
-          <div className="card__title">{title}</div>
-          {subtitle ? <div className="card__subtitle">{subtitle}</div> : null}
+          <div>{title}</div>
+          {subtitle ? <div className="small text-muted">{subtitle}</div> : null}
         </div>
         {actions}
       </div>
-      <div className="card__body">{children}</div>
-    </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="form__field">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="empty-state">
-      <strong>{message}</strong>
-      <span>Check back after the bot has run.</span>
-    </div>
-  );
-}
-
-function normalizeJsonValue(value: unknown): unknown {
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return {};
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try {
-        return JSON.parse(trimmed);
-      } catch {
-        return trimmed;
-      }
-    }
-    return trimmed;
-  }
-
-  if (value === null || value === undefined) return {};
-  return value;
-}
-
-function JsonPreview({ value, emptyLabel }: { value: unknown; emptyLabel?: string }) {
-  const normalized = normalizeJsonValue(value);
-
-  if (typeof normalized === 'string') {
-    const display = normalized.trim() || emptyLabel || '—';
-    return (
-      <div className="json-block">
-        <pre>{display}</pre>
-      </div>
-    );
-  }
-
-  if (typeof normalized === 'number' || typeof normalized === 'boolean') {
-    return (
-      <div className="json-block">
-        <pre>{String(normalized)}</pre>
-      </div>
-    );
-  }
-
-  const isEmptyObject = normalized && !Array.isArray(normalized) && typeof normalized === 'object'
-    ? Object.keys(normalized as Record<string, unknown>).length === 0
-    : false;
-  const isEmptyArray = Array.isArray(normalized) && normalized.length === 0;
-
-  if ((isEmptyObject || isEmptyArray) && emptyLabel) {
-    return (
-      <div className="json-block json-block--empty">
-        <span>{emptyLabel}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="json-block">
-      <pre dangerouslySetInnerHTML={{ __html: jsonHighlightHtml(normalized) }} />
-    </div>
-  );
-}
-
-function GeminiTester({ onDone }: { onDone?: () => void }) {
-  const [prompt, setPrompt] = useState('Say hello.');
-  const [result, setResult] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  async function send() {
-    if (!prompt.trim()) return;
-    setIsSubmitting(true);
-    try {
-      const response = await fetch('/api/gemini/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      });
-      const json = await response.json().catch(() => ({ ok: false }));
-      setResult(json.ok ? String(json.response) : `Error: ${json.error || 'unknown'}`);
-      onDone?.();
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="form">
-      <Field label="Prompt">
-        <textarea
-          rows={3}
-          value={prompt}
-          onChange={event => setPrompt(event.target.value)}
-          placeholder="Ask a quick question or describe a trade scenario"
-        />
-      </Field>
-      <div className="form__actions">
-        <button type="button" className="btn btn-primary" onClick={send} disabled={isSubmitting}>
-          {isSubmitting ? 'Sending…' : 'Send To Gemini'}
-        </button>
-        <button
-          type="button"
-          className="btn btn-outline"
-          onClick={() => setPrompt('')}
-          disabled={isSubmitting || prompt.length === 0}
-        >
-          Clear
-        </button>
-      </div>
-      {result ? (
-        <div className="json-block" style={{ maxHeight: 180 }}>
-          <pre><code>{result}</code></pre>
-        </div>
-      ) : null}
+      <div className="card-body">{children}</div>
     </div>
   );
 }

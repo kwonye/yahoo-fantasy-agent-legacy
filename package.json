@@ -16,11 +16,7 @@
     "test:watch": "jest --watch",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
     "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
-    "format": "prettier --write 'src/**/*.{ts,tsx,html,json}'",
-    "web": "node dist/web/server.js > logs/server_output.log 2>&1",
-    "web:https": "ENABLE_HTTPS=1 SSL_CERT_PATH=config/certs/cert.pem SSL_KEY_PATH=config/certs/key.pem ts-node src/web/server.ts",
-    "web:dev": "nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"npx ts-node src/web/server.ts\"",
-    "web:dev:https": "ENABLE_HTTPS=1 SSL_CERT_PATH=config/certs/cert.pem SSL_KEY_PATH=config/certs/key.pem nodemon --signal SIGTERM --ext ts,html,json --watch src --watch public --ignore logs --exec \"npx ts-node src/web/server.ts\""
+    "format": "prettier --write 'src/**/*.{ts,tsx,html,json}'"
   },
   "engines": {
     "node": ">=18"
@@ -39,12 +35,10 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
-    "@types/supertest": "^6.0.3",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "axios-mock-adapter": "^1.22.0",
@@ -54,7 +48,6 @@
     "jest": "^29.5.0",
     "nodemon": "^3.1.10",
     "prettier": "^3.0.0",
-    "supertest": "^6.3.4",
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.0",
     "typescript": "^5.0.0"
@@ -63,11 +56,9 @@
     "@vercel/analytics": "^1.5.0",
     "axios": "^1.6.0",
     "dotenv": "^16.3.0",
-    "express": "^4.19.2",
     "luxon": "^3.5.0",
     "next": "^15.5.3",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "serverless-http": "^3.2.0"
+    "react-dom": "^18.2.0"
   }
 }
