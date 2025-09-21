@@ -55,7 +55,7 @@ export class GeminiClient {
     config: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<LineupDecision> {
-    const system = 'You are a fantasy football lineup optimizer. Respond with JSON only.';
+  const system = 'You are a fantasy football lineup optimizer. Incorporate current player news (injuries, practice reports, roster moves), matchup context, and league scoring rules when making recommendations. Respond with JSON only.';
     const user = this.buildLineupPrompt(roster, leagueSettings, context);
     const text = await this.generate(system, user, { kind: 'lineup', roster, leagueSettings, preferences: config, context });
     return this.parseJson<LineupDecision>(text, 'LineupDecision');
@@ -67,7 +67,7 @@ export class GeminiClient {
     maxClaims: number,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<WaiverDecision> {
-    const system = 'You are a fantasy football free-agent pickups strategist. Respond with JSON only.';
+  const system = 'You are a fantasy football free-agent pickups strategist. Incorporate current player news (injuries, practice reports, roster moves), matchup context, and league scoring/roster rules. Respond with JSON only.';
     const user = this.buildWaiverPrompt(availablePlayers, maxClaims, context);
     const text = await this.generate(system, user, { kind: 'waivers', availablePlayers, preferences: config, maxClaims, context });
     return this.parseJson<WaiverDecision>(text, 'WaiverDecision');
@@ -80,7 +80,7 @@ export class GeminiClient {
     maxAdds: number,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<WaiverDecision> {
-    const system = 'You are a fantasy football free-agent pickups strategist. Respond with JSON only.';
+  const system = 'You are a fantasy football free-agent pickups strategist. Incorporate current player news (injuries, practice reports, roster moves), matchup context, and league scoring/roster rules. Respond with JSON only.';
     const user = this.buildImmediatePickupPrompt(availablePlayers, myRoster, maxAdds, context);
     const text = await this.generate(system, user, { kind: 'pickups', availablePlayers, myRoster, maxAdds, context });
     return this.parseJson<WaiverDecision>(text, 'ImmediatePickups');
@@ -92,7 +92,7 @@ export class GeminiClient {
     myRoster: Player[],
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<{ dropPlayerId: string; reasoning: string }>{
-    const system = 'You are a fantasy football roster manager. Respond with JSON only.';
+  const system = 'You are a fantasy football roster manager. Incorporate current player news (injuries, practice reports, roster moves) and league scoring/roster configuration when recommending drops. Respond with JSON only.';
     const rosterLite = Array.isArray(myRoster)
       ? myRoster.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
       : [];
@@ -125,7 +125,7 @@ export class GeminiClient {
     config: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<TradeDecision> {
-    const system = 'You are a fantasy football trade evaluator. Respond with JSON only.';
+  const system = 'You are a fantasy football trade evaluator. Incorporate current player news (injuries, practice reports, roster moves), upcoming schedule, and league scoring/roster rules when evaluating trades. Respond with JSON only.';
     const user = this.buildTradePrompt(myRoster, theirRoster, context);
     const text = await this.generate(system, user, { kind: 'trade', myRoster, theirRoster, preferences: config, context });
     return this.parseJson<TradeDecision>(text, 'TradeDecision');
@@ -137,7 +137,7 @@ export class GeminiClient {
     config: BotConfig,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<TradeDecision> {
-    const system = 'You are a fantasy football trade strategist. Respond with JSON only.';
+  const system = 'You are a fantasy football trade strategist. Incorporate current player news (injuries, practice reports, roster moves), upcoming schedule, and league scoring/roster rules when evaluating multi-team trades. Respond with JSON only.';
     const user = this.buildTradeMultiPrompt(myRoster, opponents, context);
     const text = await this.generate(system, user, { kind: 'trade-multi', myRoster, opponentsCount: opponents.length, preferences: config, context });
     return this.parseJson<TradeDecision>(text, 'TradeDecisionMulti');
@@ -149,7 +149,7 @@ export class GeminiClient {
     leagueSettings: LeagueSettings,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): { system: string; user: string } {
-    const system = 'You are a fantasy football lineup optimizer. Respond with JSON only.';
+  const system = 'You are a fantasy football lineup optimizer. Incorporate current player news (injuries, practice reports, roster moves), matchup context, and league scoring rules when making recommendations. Respond with JSON only.';
     // Inline prompt build to avoid requiring API key for previews
     const rosterLite = Array.isArray(roster)
       ? roster.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
@@ -175,7 +175,7 @@ export class GeminiClient {
     const meta = lp?.meta || {};
     const user = [
       'Task: Recommend an optimal starting lineup based on roster, league settings, and preferences.',
-      'Guidance: Use the latest news/data for each player to determine the fantasy lineup based on the provided league setup. Do not rely on any points fields in the input.',
+  'Guidance: Use the latest news and real-world context for each player (injuries, practice reports, suspensions, roster moves, projected snaps, matchup, and weather). Tailor decisions to the provided league scoring and roster setup (PPR, scoring weights, rosterPositions, bench size, and starting requirements). Prioritize short-term availability and matchup impact; when news conflicts, state which reports you relied on inside the reasoning fields.',
       'Rules: Respond with JSON only. No commentary. Follow schema exactly.',
       'Schema: { "recommendedLineup": { "starters": { [position: string]: any }, "bench": any[] }, "changes": Array<{ "position": string, "playerOut"?: any, "playerIn": any, "reasoning": string, "pointsImpact": number }>, "confidence": number, "reasoning": string, "projectedPoints": number }',
       '',
@@ -203,7 +203,7 @@ export class GeminiClient {
     maxClaims: number,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): { system: string; user: string } {
-    const system = 'You are a fantasy football waiver-wire analyst. Respond with JSON only.';
+  const system = 'You are a fantasy football waiver-wire analyst. Incorporate current player news (injuries, practice reports, roster moves), matchup context, and league scoring/roster rules. Respond with JSON only.';
     const lite = Array.isArray(players)
       ? players.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
       : [];
