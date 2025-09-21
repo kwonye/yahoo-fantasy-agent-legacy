@@ -67,6 +67,35 @@ function sseBroadcast(event: string, payload: any) {
 }
 
 app.use(express.json());
+
+// Dashboard password protection: if DASHBOARD_PASSWORD is set, require a simple
+// HTTP Basic Auth style check for requests to the dashboard root and index.
+const dashboardPassword = String(process.env.DASHBOARD_PASSWORD || '');
+function dashboardAuthMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  // Only enforce on GET requests to root or index.html or requests for '/'
+  if (!dashboardPassword) return next();
+  const isRootGet = req.method === 'GET' && (req.path === '/' || req.path === '/index.html');
+  // Also protect the single-page app entry when Accept prefers HTML
+  const wantsHtml = (req.headers.accept || '').includes('text/html');
+  if (!isRootGet && !wantsHtml) return next();
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Dashboard"');
+    res.status(401).send('Unauthorized');
+    return;
+  }
+  try {
+    const creds = Buffer.from(auth.slice(6), 'base64').toString('utf8');
+    const parts = creds.split(':');
+    const supplied = parts.slice(1).join(':'); // allow empty username
+    if (supplied === dashboardPassword) return next();
+  } catch {}
+  res.setHeader('WWW-Authenticate', 'Basic realm="Dashboard"');
+  res.status(401).send('Unauthorized');
+}
+
+app.use(dashboardAuthMiddleware);
+
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 app.get('/health', (_req, res) => {
