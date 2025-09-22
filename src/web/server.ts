@@ -17,7 +17,7 @@ import { ConfigManager } from '../services/ConfigManager';
 
 dotenv.config();
 
-const app = express();
+export const app = express();
 app.set('trust proxy', true);
 const defaultPort = parseInt(process.env.PORT || '3000', 10);
 let scheduler: Scheduler | null = null;
@@ -1710,11 +1710,11 @@ app.post('/api/features', (req, res) => {
 
 export function startServer(portOverride?: number): Promise<http.Server | https.Server> {
   const port = portOverride ?? defaultPort;
-  return new Promise((resolve) => {
-    const enableHttps = true;
-    const certPath = require('path').join(process.cwd(), 'config', 'certs', 'cert.pem');
-    const keyPath = require('path').join(process.cwd(), 'config', 'certs', 'key.pem');
-    const httpsPort = port;
+  return new Promise((resolve, reject) => {
+    const certPath = path.join(process.cwd(), 'config', 'certs', 'cert.pem');
+    const keyPath = path.join(process.cwd(), 'config', 'certs', 'key.pem');
+    const httpsEnv = String(process.env.ENABLE_HTTPS || '').trim().toLowerCase();
+    const enableHttps = httpsEnv === '1' || httpsEnv === 'true' || httpsEnv === 'yes';
 
     const startPostHooks = () => {
       // Optionally enable kickoff checks
@@ -1765,35 +1765,43 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
       } catch {}
     };
 
-    // Enforce HTTPS-only when enabled; do not fall back to HTTP
     if (enableHttps) {
-      if (!(certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath))) {
-        console.error('HTTPS requested but TLS certs are missing or invalid. Expected at config/certs/cert.pem and config/certs/key.pem');
-        throw new Error('Missing SSL cert/key for HTTPS');
+      if (!(fs.existsSync(certPath) && fs.existsSync(keyPath))) {
+        const msg = 'HTTPS requested but TLS certs are missing or invalid. Expected at config/certs/cert.pem and config/certs/key.pem';
+        console.error(msg);
+        reject(new Error('Missing SSL cert/key for HTTPS'));
+        return;
       }
       try {
         const creds = { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) } as any;
         const httpsServer = https.createServer(creds, app);
-        httpsServer.listen(httpsPort, () => {
-          console.log(`Web dashboard listening on https://localhost:${httpsPort}`);
+        httpsServer.listen(port, () => {
+          console.log(`Web dashboard listening on https://localhost:${port}`);
           (global as any).__httpsServer = httpsServer;
           startPostHooks();
           resolve(httpsServer);
         });
+        httpsServer.on('error', reject);
         return;
       } catch (e) {
         console.warn('HTTPS startup error:', (e as Error).message);
-        throw e;
+        reject(e as Error);
+        return;
       }
     }
 
-    const server = app.listen(port, () => {
+    const server = http.createServer(app);
+    server.listen(port, () => {
       console.log(`Web dashboard listening on http://localhost:${port}`);
+      (global as any).__httpServer = server;
       startPostHooks();
       resolve(server);
     });
+    server.on('error', reject);
   });
 }
+
+export default app;
 
 if (require.main === module) {
   startServer();
