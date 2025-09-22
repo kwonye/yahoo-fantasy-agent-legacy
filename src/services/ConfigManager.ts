@@ -20,10 +20,35 @@ export class ConfigManager {
 
   constructor(options: ConfigManagerOptions = {}) {
     dotenv.config();
-    const defaultDir = path.join(process.cwd(), '.secure');
-    this.configDir = options.configDir ?? process.env.CONFIG_DIR ?? defaultDir;
+    const preferredDir = options.configDir ?? process.env.CONFIG_DIR ?? path.join(process.cwd(), '.secure');
+    const fallbackDir = path.join(os.tmpdir(), 'yahoo-fantasy-agent-secure');
+    this.configDir = preferredDir;
     const encryptionKey = options.encryptionKey ?? process.env.CONFIG_ENCRYPTION_KEY ?? '';
-    this.store = encryptionKey ? new SecureStore({ baseDir: this.configDir, encryptionKey }) : null;
+    if (encryptionKey) {
+      const candidates = [preferredDir];
+      if (!candidates.includes(fallbackDir)) candidates.push(fallbackDir);
+      let initialized: SecureStore | null = null;
+      let lastError: Error | null = null;
+      for (const dir of candidates) {
+        try {
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          const testFile = path.join(dir, `.write-check-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+          fs.writeFileSync(testFile, 'ok', 'utf8');
+          try { fs.unlinkSync(testFile); } catch {}
+          initialized = new SecureStore({ baseDir: dir, encryptionKey });
+          this.configDir = dir;
+          break;
+        } catch (e) {
+          lastError = e as Error;
+        }
+      }
+      if (!initialized) {
+        console.warn('[ConfigManager] SecureStore disabled: unable to find writable config directory.', lastError?.message);
+      }
+      this.store = initialized;
+    } else {
+      this.store = null;
+    }
     
     this.leaguesDir = path.join(process.cwd(), 'config', 'leagues');
     this.appSettingsPath = path.join(process.cwd(), 'config', 'app-settings.json');
