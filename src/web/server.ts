@@ -21,6 +21,7 @@ export const app = express();
 app.set('trust proxy', true);
 const defaultPort = parseInt(process.env.PORT || '3000', 10);
 let scheduler: Scheduler | null = null;
+let incomingTradeWatcher: NodeJS.Timeout | null = null;
 // runtime state is sourced from AppSettings
 const cmInit = new ConfigManager();
 let appSettings = cmInit.loadAppSettings();
@@ -1815,6 +1816,39 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
             if (name === 'audit.log') sseBroadcast('activity', { file: 'audit.log', ts: Date.now() });
             else if (name === 'gemini.log') sseBroadcast('gemini', { file: 'gemini.log', ts: Date.now() });
           });
+        }
+      } catch {}
+      // Incoming trade watcher (hourly)
+      try {
+        if (incomingTradeWatcher) {
+          clearInterval(incomingTradeWatcher);
+          incomingTradeWatcher = null;
+        }
+        const app = new ConfigManager().loadAppSettings();
+        if (app.tradesAutomationEnabled) {
+          const lk = app.leagueKey || '';
+          const tk = app.teamKey || '';
+          if (lk && tk) {
+            const intervalMs = 60 * 60 * 1000;
+            let running = false;
+            const runCheck = async () => {
+              if (running) return;
+              running = true;
+              try {
+                const bot = new BotController({ leagueKey: lk, teamKey: tk });
+                await bot.runIncomingTradeCheck();
+              } catch (err) {
+                console.warn('Incoming trade watcher error:', (err as Error).message);
+              } finally {
+                running = false;
+              }
+            };
+            void runCheck();
+            incomingTradeWatcher = setInterval(() => {
+              void runCheck();
+            }, intervalMs);
+            console.log('Incoming trade watcher enabled (every 60 min).');
+          }
         }
       } catch {}
     };

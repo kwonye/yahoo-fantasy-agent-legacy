@@ -268,7 +268,7 @@ export class GeminiClient {
       'Use roster balance, positional scarcity, player health, upcoming schedules, and league scoring to craft fair, realistic trades.',
       'Never propose lopsided or impossible deals (e.g., duplicate players, bye-week overload). Output valid JSON only.',
       'Only reference injuries or news if they are explicitly present in the provided context; otherwise mention that no recent update is available.',
-      'Invoke the Google Search tool whenever additional or real-time context is required and rely solely on the returned information.'
+      'Invoke the Google Search tool whenever additional or real-time context is required and integrate any relevant findings with the provided data (note when nothing useful is discovered).'
     ].join('\n');
     const mine = Array.isArray(myRoster)
       ? myRoster.map((p) => ({ id: p.id, name: p.name, position: p.position, team: p.team, status: p.status }))
@@ -303,7 +303,7 @@ export class GeminiClient {
       'You are a fantasy football roster balance analyst.',
       'Compare roster depth to required starters, factoring positional scarcity, injuries, and bye-week exposure to flag needs and surplus.',
       'Reference current news or injuries only if the input provides them; otherwise disclose that the data is not available.',
-      'You MUST call the Google Search tool to gather additional context and rely solely on the returned results.',
+      'You MUST call the Google Search tool to gather additional context and blend any relevant findings with the provided data (note when search yields nothing).',
       'Respond with concise JSON only. Do not fabricate players or stats.'
     ].join('\n');
     // Summarize counts by position
@@ -317,7 +317,7 @@ export class GeminiClient {
       'Task: Identify positional needs and surplus for trades based on roster depth vs league lineup requirements.',
       'Rules: Respond with JSON only. No commentary beyond a brief reasoning string.',
       'Guidance: Use provided status/injury notes; if no recent information is available, acknowledge the uncertainty instead of inventing updates.',
-      'You MUST call the Google Search tool before finalizing this analysis and rely solely on the returned snippets.',
+      'You MUST call the Google Search tool before finalizing this analysis and augment the provided data with any useful snippets (and note when the search adds nothing new).',
       'Schema: { "needs": string[], "surplus": string[], "reasoning": string }',
       '',
       'LeagueRosterPositions JSON:',
@@ -346,7 +346,7 @@ export class GeminiClient {
       'Consider roster needs/surplus, player health, usage trends, upcoming schedule difficulty, and league scoring to judge benefit vs risk.',
       'Be conservative unless the trade clearly improves expected outcomes. Output valid JSON only.',
       'Only cite news or injury updates when they appear in the provided context or when retrieved via the Google Search tool.',
-      'You MUST call the Google Search tool before responding and rely solely on the returned information.'
+      'You MUST call the Google Search tool before responding and incorporate any relevant findings with the provided data (noting when search yields nothing new).'
     ].join('\n');
     const incoming = moves.filter(m => (m.destination || '').includes('.t.') ? (m.destination === myTeamKey || ((): boolean => {
       const idx = myTeamKey.lastIndexOf('.t.'); if (idx <= 0) return false; const myNum = myTeamKey.slice(idx+3); return (m.destination || '').endsWith('.t.'+myNum);
@@ -363,7 +363,7 @@ export class GeminiClient {
       '- Use my needs/surplus, positional scarcity, player health, usage trends, and upcoming schedules to judge value.',
       '- Decline if the trade increases risk, erodes depth, or fails to improve projected outcomes.',
       '- Flag salary/keeper or FAAB notes only if present in the data or when retrieved via the Google Search tool; otherwise keep reasoning concise.',
-      '- ALWAYS call the Google Search tool to augment your evaluation and weave any useful findings into the reasoning while noting when search uncovers nothing new.',
+      '- ALWAYS call the Google Search tool to augment your evaluation, weaving any useful findings into the reasoning while noting when search uncovers nothing new.',
       '- Output valid JSON only and never fabricate players or metrics.',
       'Schema: { "shouldAccept": boolean, "reasoning": string, "confidence": number }',
       '',

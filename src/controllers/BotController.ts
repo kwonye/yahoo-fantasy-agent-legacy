@@ -110,6 +110,10 @@ export class BotController {
     this.audit.recordAction('daily_end');
   }
 
+  async runIncomingTradeCheck(): Promise<void> {
+    await this.processIncomingTradeOffers();
+  }
+
   // Evaluate immediate free-agent pickups and apply add/drops (strict drop enforcement when roster full)
   private async processPickups() {
     try {
