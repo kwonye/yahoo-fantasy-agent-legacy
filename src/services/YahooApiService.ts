@@ -52,17 +52,18 @@ export class YahooApiService {
   }
 
   // ---------------- XML write helpers (best-effort scaffolding) ----------------
-  private async postXml(pathname: string, xml: string): Promise<any> {
+  private async sendXml(method: 'POST' | 'PUT', pathname: string, xml: string): Promise<any> {
     const headers = { ...(await this.authHeaders()), 'Content-Type': 'application/xml' };
     const url = `${this.baseUrl}${pathname}`;
     try {
-      const { data } = await this.http.post(url, xml, { headers });
+      const { data } = await this.http.request({ method, url, data: xml, headers });
       return data;
     } catch (e: any) {
       // Log error payload for diagnostics
       try {
         this.debugDump('last_write_error.json', {
           url,
+          method,
           status: e?.response?.status,
           statusText: e?.response?.statusText,
           data: e?.response?.data || null,
@@ -74,11 +75,78 @@ export class YahooApiService {
     }
   }
 
+  private async postXml(pathname: string, xml: string): Promise<any> {
+    return this.sendXml('POST', pathname, xml);
+  }
+
+  private async putXml(pathname: string, xml: string): Promise<any> {
+    return this.sendXml('PUT', pathname, xml);
+  }
+
   async updateRosterXml(teamKey: string, xml: string): Promise<{ success: boolean }> {
-    // Yahoo typically accepts roster updates via team roster endpoint
-    const path = `/team/${encodeURIComponent(teamKey)}/roster`;
-    await this.postXml(path, xml);
+    // Back-compat helper when callers pre-build XML payloads.
+    const path = `/team/${encodeURIComponent(teamKey)}/roster;players`;
+    await this.putXml(path, xml);
     return { success: true };
+  }
+
+  async updateRosterAssignments(
+    teamKey: string,
+    assignments: Array<{ position: string; playerId: string }>,
+    opts: { week?: number; coverageType?: string } = {}
+  ): Promise<{ success: boolean; xml: string; week?: number }> {
+    if (!assignments || assignments.length === 0) {
+      return { success: true, xml: '', week: opts.week };
+    }
+
+    const leagueKey = this.deriveLeagueKeyFromTeamKey(teamKey);
+    const gameKey = leagueKey ? leagueKey.split('.l.')[0] : undefined;
+
+    let week = opts.week;
+    if (week === undefined && leagueKey) {
+      try {
+        const league = await this.getLeague(leagueKey);
+        if (typeof league.currentWeek === 'number') week = league.currentWeek;
+      } catch {
+        // ignore lookup failure; Yahoo will default to current week
+      }
+    }
+
+    const normalizePlayerKey = (pid: string): string => {
+      const trimmed = String(pid).trim();
+      if (/^\d+\.p\.\d+$/i.test(trimmed) || trimmed.includes('.p.')) return trimmed;
+      if (trimmed && /^\d+$/.test(trimmed) && gameKey) return `${gameKey}.p.${trimmed}`;
+      return trimmed;
+    };
+
+    const sanitizePosition = (pos: string): string => {
+      const upper = String(pos || '').trim().toUpperCase();
+      return upper || 'BN';
+    };
+
+    const escape = (value: string): string =>
+      String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+
+    const playersXml = assignments
+      .map((assignment) => {
+        const playerKey = normalizePlayerKey(assignment.playerId);
+        const position = sanitizePosition(assignment.position);
+        return `<player><player_key>${escape(playerKey)}</player_key><position>${escape(position)}</position></player>`;
+      })
+      .join('');
+
+    const coverageType = escape(String(opts.coverageType || 'week'));
+    const weekXml = week !== undefined ? `<week>${escape(String(week))}</week>` : '';
+    const xml = `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><roster><coverage_type>${coverageType}</coverage_type>${weekXml}<players>${playersXml}</players></roster></fantasy_content>`;
+
+    const path = `/team/${encodeURIComponent(teamKey)}/roster;players`;
+    await this.putXml(path, xml);
+    return { success: true, xml, week };
   }
 
   async submitTransactionsXml(leagueKey: string, xml: string): Promise<{ success: boolean; id?: string }> {
@@ -653,6 +721,68 @@ export class YahooApiService {
     const headers = { ...(await this.authHeaders()), 'Content-Type': 'application/json' } as any;
     const { data } = await this.http.post(url, { claims: _claims }, { headers });
     return { success: !!(data && (data.success === true || data.ok === true)) };
+  }
+
+  async getRecentDropsToWaivers(
+    teamKey: string,
+    leagueKey: string,
+    sinceMs: number,
+    limit: number = 40
+  ): Promise<Array<{ playerId: string; playerKey?: string; playerName?: string; droppedAt: number }>> {
+    const normalized = await this.getAllTransactionsNormalized(leagueKey, teamKey, limit);
+    const results: Array<{ playerId: string; playerKey?: string; playerName?: string; droppedAt: number }> = [];
+    for (const txn of normalized) {
+      if (!Array.isArray(txn.raw)) continue;
+      const timestampNode = txn.raw.find((node: any) => node && typeof node === 'object' && 'timestamp' in node);
+      const tsSeconds = timestampNode ? Number((timestampNode as any).timestamp) : NaN;
+      if (!Number.isFinite(tsSeconds)) continue;
+      const droppedAt = tsSeconds * 1000;
+      if (droppedAt < sinceMs) continue;
+      const playersNode = txn.raw.find((node: any) => node && typeof node === 'object' && node.players)?.players;
+      if (!playersNode) continue;
+      for (const entry of Object.values(playersNode) as any[]) {
+        const segments = entry?.player;
+        if (!Array.isArray(segments)) continue;
+        const metaArr = Array.isArray(segments[0]) ? segments[0] : [];
+        let playerId: string | undefined;
+        let playerKey: string | undefined;
+        let playerName: string | undefined;
+        for (const meta of metaArr as any[]) {
+          if (!meta || typeof meta !== 'object') continue;
+          if (meta.player_id || meta.playerId) playerId = String(meta.player_id ?? meta.playerId);
+          else if (meta.player_key) playerKey = String(meta.player_key);
+          else if (meta.name?.full) playerName = String(meta.name.full);
+        }
+        const tdSegment = segments.find((segment: any) => segment && typeof segment === 'object' && segment.transaction_data);
+        if (!tdSegment) continue;
+        const tdRaw = tdSegment.transaction_data;
+        const tdEntries = Array.isArray(tdRaw) ? tdRaw : tdRaw ? [tdRaw] : [];
+        const dropEntry = tdEntries.find((td: any) => String(td?.type || '').toLowerCase() === 'drop');
+        if (!dropEntry) continue;
+        const sourceKey = dropEntry?.source_team_key ? String(dropEntry.source_team_key) : undefined;
+        if (sourceKey && !this.sameTeamKey(sourceKey, teamKey)) continue;
+        const destinationType = String(dropEntry?.destination_type || '').toLowerCase();
+        if (destinationType !== 'waivers') continue;
+        if (!playerId) {
+          const match = (playerKey || '').match(/(\d+)$/);
+          if (match) playerId = match[1];
+        }
+        if (!playerId) continue;
+        results.push({ playerId, playerKey, playerName, droppedAt });
+      }
+    }
+    return results;
+  }
+
+  private sameTeamKey(a: string, b: string): boolean {
+    const normalize = (key: string) => String(key).toLowerCase();
+    const na = normalize(a);
+    const nb = normalize(b);
+    if (na === nb) return true;
+    const digitsA = na.match(/\.t\.(\d+)/);
+    const digitsB = nb.match(/\.t\.(\d+)/);
+    if (digitsA && digitsB) return digitsA[1] === digitsB[1];
+    return false;
   }
 
   async proposeTrade(_leagueKey: string, _proposal: TradeProposal): Promise<{ success: boolean; id?: string }>{

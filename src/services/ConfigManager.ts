@@ -1,9 +1,9 @@
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import { ApiCredentials, YahooCredentials, GeminiCredentials, RiskLevel, AuthToken, LeagueProfile, AppSettings } from '../models';
 import { SecureStore } from './SecureStore';
+import { KvSecureStore } from './KvSecureStore';
 
 export interface ConfigManagerOptions {
   configDir?: string; // where to store encrypted credentials
@@ -11,9 +11,16 @@ export interface ConfigManagerOptions {
   
 }
 
+type ConfigStore = {
+  save<T>(name: string, data: T): void;
+  load<T>(name: string): T | null;
+  remove(name: string): void;
+};
+
 export class ConfigManager {
-  private readonly configDir: string;
-  private readonly store: SecureStore | null;
+  private configDir: string;
+  private readonly store: ConfigStore | null;
+  private readonly storeUsesFilesystem: boolean;
   
   private readonly leaguesDir: string;
   private readonly appSettingsPath: string;
@@ -21,34 +28,29 @@ export class ConfigManager {
   constructor(options: ConfigManagerOptions = {}) {
     dotenv.config();
     const preferredDir = options.configDir ?? process.env.CONFIG_DIR ?? path.join(process.cwd(), '.secure');
-    const fallbackDir = path.join(os.tmpdir(), 'yahoo-fantasy-agent-secure');
     this.configDir = preferredDir;
     const encryptionKey = options.encryptionKey ?? process.env.CONFIG_ENCRYPTION_KEY ?? '';
+    let store: ConfigStore | null = null;
+    let usesFs = false;
     if (encryptionKey) {
-      const candidates = [preferredDir];
-      if (!candidates.includes(fallbackDir)) candidates.push(fallbackDir);
-      let initialized: SecureStore | null = null;
-      let lastError: Error | null = null;
-      for (const dir of candidates) {
-        try {
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          const testFile = path.join(dir, `.write-check-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-          fs.writeFileSync(testFile, 'ok', 'utf8');
-          try { fs.unlinkSync(testFile); } catch {}
-          initialized = new SecureStore({ baseDir: dir, encryptionKey });
-          this.configDir = dir;
-          break;
-        } catch (e) {
-          lastError = e as Error;
+      const local = this.tryCreateLocalStore(preferredDir, encryptionKey);
+      if (local) {
+        store = local.store;
+        this.configDir = local.dir;
+        usesFs = true;
+      } else {
+        const kv = this.tryCreateKvStore(encryptionKey);
+        if (kv) {
+          store = kv;
+          this.configDir = `kv:${process.env.CONFIG_KV_PREFIX ?? 'yahoo-fantasy-agent'}`;
+          usesFs = false;
+        } else {
+          console.warn('[ConfigManager] SecureStore disabled: no writable directory and KV not configured.');
         }
       }
-      if (!initialized) {
-        console.warn('[ConfigManager] SecureStore disabled: unable to find writable config directory.', lastError?.message);
-      }
-      this.store = initialized;
-    } else {
-      this.store = null;
     }
+    this.store = store;
+    this.storeUsesFilesystem = usesFs;
     
     this.leaguesDir = path.join(process.cwd(), 'config', 'leagues');
     this.appSettingsPath = path.join(process.cwd(), 'config', 'app-settings.json');
@@ -118,7 +120,7 @@ export class ConfigManager {
 
   deleteYahooAuthToken(): void {
     this.ensureStore();
-    try { (this.store as any).remove('yahoo-token'); } catch {}
+    try { this.store!.remove('yahoo-token'); } catch {}
   }
 
   // --------- Helpers ---------
@@ -286,8 +288,37 @@ export class ConfigManager {
     if (!this.store) {
       throw new Error('SecureStore not configured. Set CONFIG_ENCRYPTION_KEY or pass encryptionKey.');
     }
-    if (!fs.existsSync(this.configDir)) {
+    if (this.storeUsesFilesystem && !fs.existsSync(this.configDir)) {
       fs.mkdirSync(this.configDir, { recursive: true });
+    }
+  }
+
+  private tryCreateLocalStore(dir: string, encryptionKey: string): { store: SecureStore; dir: string } | null {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const testFile = path.join(dir, `.write-check-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      fs.writeFileSync(testFile, 'ok', 'utf8');
+      try { fs.unlinkSync(testFile); } catch {}
+      const store = new SecureStore({ baseDir: dir, encryptionKey });
+      return { store, dir };
+    } catch (e) {
+      if ((process.env.CONFIG_DEBUG ?? '').toLowerCase() === '1') {
+        console.warn('[ConfigManager] Local secure store init failed:', (e as Error).message);
+      }
+      return null;
+    }
+  }
+
+  private tryCreateKvStore(encryptionKey: string): ConfigStore | null {
+    const baseUrl = process.env.KV_REST_API_URL;
+    const token = process.env.KV_REST_API_TOKEN;
+    if (!baseUrl || !token) return null;
+    try {
+      const prefix = process.env.CONFIG_KV_PREFIX ?? 'yahoo-fantasy-agent';
+      return new KvSecureStore({ baseUrl, token, encryptionKey, prefix });
+    } catch (e) {
+      console.warn('[ConfigManager] KV secure store init failed:', (e as Error).message);
+      return null;
     }
   }
 

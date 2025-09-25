@@ -9,6 +9,8 @@ describe('YahooWriteAdapter', () => {
     submitWaiverClaims: jest.fn().mockResolvedValue({ success: true }),
     proposeTrade: jest.fn().mockResolvedValue({ success: true, id: 't1' }),
     updateRosterXml: jest.fn().mockResolvedValue({ success: true }),
+    getRecentDropsToWaivers: jest.fn().mockResolvedValue([]),
+    updateRosterAssignments: jest.fn().mockResolvedValue({ success: true, xml: '<xml />' }),
     submitTransactionsXml: jest.fn().mockResolvedValue({ success: true, id: 'x1' }),
     proposeTradeXml: jest.fn().mockResolvedValue({ success: true, id: 'x2' }),
   } as any;

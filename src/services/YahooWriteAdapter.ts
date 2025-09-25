@@ -35,9 +35,16 @@ export class YahooWriteAdapter {
 
   planLineupAssignments(_roster: Player[], target: Lineup): LineupAssignment[] {
     const assignments: LineupAssignment[] = [];
-    for (const [position, player] of Object.entries(target.starters)) {
+    for (const [position, player] of Object.entries(target.starters || {})) {
       if (player && player.id) {
-        assignments.push({ position, playerId: player.id });
+        const pid = String(player.id);
+        assignments.push({ position, playerId: pid });
+      }
+    }
+    for (const player of target.bench || []) {
+      if (player && player.id) {
+        const pid = String(player.id);
+        assignments.push({ position: 'BN', playerId: pid });
       }
     }
     return assignments;
@@ -53,12 +60,19 @@ export class YahooWriteAdapter {
 
   async applyAssignments(teamKey: string, assignments: LineupAssignment[]): Promise<{ success: boolean }> {
     this.dump('assignments', this.buildLineupPayload(assignments));
-    const xml = this.buildLineupXML(assignments);
-    this.dump('assignments.xml', xml);
     try {
-      const res = await (this.api as any).updateRosterXml(teamKey, xml);
+      const apiAny = this.api as any;
+      if (typeof apiAny.updateRosterAssignments === 'function') {
+        const res = await apiAny.updateRosterAssignments(teamKey, assignments);
+        if (res?.xml) this.dump('assignments.xml', res.xml);
+        return { success: !!res?.success };
+      }
+      const xml = this.buildLineupXML(teamKey, assignments);
+      this.dump('assignments.xml', xml);
+      const res = await apiAny.updateRosterXml(teamKey, xml);
       return res;
-    } catch {
+    } catch (e) {
+      console.error('Error applying roster assignments:', e);
       return { success: false };
     }
   }
@@ -66,13 +80,11 @@ export class YahooWriteAdapter {
   async applyLineup(teamKey: string, target: Lineup): Promise<{ success: boolean }> {
     const assignments = this.planLineupAssignments([], target);
     this.dump('lineup', this.buildLineupPayload(assignments));
-    // Yahoo supports writes via XML only.
-    const xml = this.buildLineupXML(assignments);
-    this.dump('lineup.xml', xml);
     try {
-      const res = await (this.api as any).updateRosterXml(teamKey, xml);
+      const res = await this.applyAssignments(teamKey, assignments);
       return res;
-    } catch {
+    } catch (e) {
+      console.error('Error applying lineup:', e);
       return { success: false };
     }
   }
@@ -110,7 +122,11 @@ export class YahooWriteAdapter {
     }
   }
 
-  async applyPickups(leagueKey: string, myTeamKey: string, decision: WaiverDecision): Promise<{ success: boolean }> {
+  async applyPickups(
+    leagueKey: string,
+    myTeamKey: string,
+    decision: WaiverDecision
+  ): Promise<{ success: boolean; error?: string }> {
     // Ensure drop ids exist where needed by deriving from current roster as a fallback
     try {
       const entries: Array<{ slot?: string; player: any }> = await (this.api as any).getTeamRosterWithSlots(myTeamKey);
@@ -126,6 +142,15 @@ export class YahooWriteAdapter {
     } catch {}
 
     try { console.log('[Pickups] Final claims before XML:', JSON.stringify(decision.claims)); } catch {}
+
+    try {
+      await this.ensurePickupEligibility(leagueKey, myTeamKey, decision.claims || []);
+    } catch (eligErr) {
+      const message = (eligErr as Error).message;
+      console.warn('[Pickups] Blocked by eligibility guard:', message);
+      return { success: false, error: message };
+    }
+
     const payload = this.buildPickupPayload(decision);
     this.dump('pickups', payload);
     const xml = this.buildPickupXML(leagueKey, myTeamKey, decision);
@@ -133,8 +158,9 @@ export class YahooWriteAdapter {
     try {
       const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
       return { success: res.success };
-    } catch {
-      return { success: false };
+    } catch (e) {
+      console.error('Error submitting pickups XML:', e);
+      return { success: false, error: (e as Error).message };
     }
   }
 
@@ -221,11 +247,29 @@ export class YahooWriteAdapter {
   }
 
   // ---------------- XML builders (best-effort payloads for iteration) ----------------
-  buildLineupXML(assignments: LineupAssignment[]): string {
-    const items = assignments
-      .map((a) => `<assignment><position>${escapeXml(a.position)}</position><player_id>${escapeXml(a.playerId)}</player_id></assignment>`) 
+  buildLineupXML(teamKey: string, assignments: LineupAssignment[], week?: number): string {
+    const gameKey = (() => {
+      const idx = teamKey.indexOf('.l.');
+      return idx > 0 ? teamKey.slice(0, idx) : undefined;
+    })();
+    const normalize = (pid: string) => {
+      const trimmed = String(pid).trim();
+      if (/^\d+\.p\.\d+/i.test(trimmed) || trimmed.includes('.p.')) return trimmed;
+      if (trimmed && /^\d+$/.test(trimmed) && gameKey) return `${gameKey}.p.${trimmed}`;
+      return trimmed;
+    };
+    const escape = (value: string): string =>
+      String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    const players = assignments
+      .map((a) => `<player><player_key>${escape(normalize(a.playerId))}</player_key><position>${escape(String(a.position || 'BN').toUpperCase())}</position></player>`)
       .join('');
-    return `<fantasy_content><roster><assignments>${items}</assignments></roster></fantasy_content>`;
+    const weekXml = week !== undefined ? `<week>${escape(String(week))}</week>` : '';
+    return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><roster><coverage_type>week</coverage_type>${weekXml}<players>${players}</players></roster></fantasy_content>`;
   }
 
   buildWaiverXML(leagueKey: string, myTeamKey: string, decision: WaiverDecision): string {
@@ -253,7 +297,8 @@ export class YahooWriteAdapter {
         ${dropKey ? `<player><player_key>${escapeXml(dropKey)}</player_key><transaction_data><type>drop</type><source_team_key>${escapeXml(myTeamKey)}</source_team_key></transaction_data></player>` : ''}`;
       })
       .join('');
-    return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><transactions><transaction><type>add</type><players>${items}</players></transaction></transactions></fantasy_content>`;
+    const ns = " xmlns=\"http://fantasysports.yahooapis.com/fantasy/v2/base.rng\"";
+    return `<?xml version="1.0" encoding="UTF-8"?><fantasy_content${ns}><transaction><type>add</type><players>${items}</players></transaction></fantasy_content>`;
   }
 
   buildPickupXML(leagueKey: string, myTeamKey: string, decision: WaiverDecision): string {
@@ -279,7 +324,103 @@ export class YahooWriteAdapter {
         ${dropKey ? `<player><player_key>${escapeXml(dropKey)}</player_key><transaction_data><type>drop</type><source_team_key>${escapeXml(myTeamKey)}</source_team_key></transaction_data></player>` : ''}`;
       })
       .join('');
-    return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><transactions><transaction><type>add/drop</type><players>${items}</players></transaction></transactions></fantasy_content>`;
+    const ns = " xmlns=\"http://fantasysports.yahooapis.com/fantasy/v2/base.rng\"";
+    return `<?xml version="1.0" encoding="UTF-8"?><fantasy_content${ns}><transaction><type>add/drop</type><players>${items}</players></transaction></fantasy_content>`;
+  }
+
+  private async ensurePickupEligibility(leagueKey: string, myTeamKey: string, claims: WaiverDecision['claims']): Promise<void> {
+    if (!Array.isArray(claims) || claims.length === 0) return;
+    const apiAny = this.api as any;
+    if (typeof apiAny.getRecentDropsToWaivers !== 'function') return;
+    const cooldownMs = this.computeWaiverCooldownMs(leagueKey);
+    if (!(cooldownMs > 0)) return;
+    const cutoff = Date.now() - cooldownMs;
+    let drops: Array<{ playerId: string; playerKey?: string; playerName?: string; droppedAt: number }> = [];
+    try {
+      drops = await apiAny.getRecentDropsToWaivers(myTeamKey, leagueKey, cutoff);
+    } catch (err) {
+      console.warn('[Pickups] Failed to query recent drops:', (err as Error).message);
+      return;
+    }
+    if (!Array.isArray(drops) || drops.length === 0) return;
+    const dropMap = new Map<string, { droppedAt: number; playerName?: string }>();
+    for (const drop of drops) {
+      if (!drop || !drop.playerId) continue;
+      const id = this.normalizePlayerId(drop.playerId);
+      if (!id) continue;
+      const existing = dropMap.get(id);
+      if (!existing || drop.droppedAt > existing.droppedAt) {
+        dropMap.set(id, { droppedAt: drop.droppedAt, playerName: drop.playerName });
+      }
+    }
+    if (dropMap.size === 0) return;
+    const blocked: Array<{ claim: any; droppedAt: number; playerName?: string }> = [];
+    for (const claim of claims) {
+      if (!claim || !claim.playerId) continue;
+      const id = this.normalizePlayerId(claim.playerId);
+      if (!id) continue;
+      const info = dropMap.get(id);
+      if (info) blocked.push({ claim, droppedAt: info.droppedAt, playerName: info.playerName });
+    }
+    if (blocked.length === 0) return;
+    const reasons = blocked.map(({ claim, droppedAt, playerName }) => {
+      const display = playerName || String(claim.playerId);
+      const elapsed = Date.now() - droppedAt;
+      const waitRemaining = droppedAt + cooldownMs - Date.now();
+      const sinceText = elapsed > 0 ? `${this.formatDuration(elapsed)} ago` : 'moments ago';
+      const remainingText = waitRemaining > 0 ? ` (~${this.formatDuration(waitRemaining)} remaining)` : '';
+      return `${display} (dropped ${sinceText}${remainingText})`;
+    });
+    throw new Error(`Cannot add players still in your waiver cooldown: ${reasons.join('; ')}.`);
+  }
+
+  private computeWaiverCooldownMs(leagueKey: string): number {
+    const envOverride = process.env.WAIVER_READD_COOLDOWN_HOURS;
+    if (envOverride) {
+      const hours = Number.parseFloat(envOverride);
+      if (Number.isFinite(hours) && hours >= 0) return hours * 60 * 60 * 1000;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { ConfigManager } = require('./ConfigManager');
+      const cm = new ConfigManager();
+      const profile = cm.loadLeagueProfile(leagueKey);
+      const meta: any = profile?.meta ?? {};
+      const raw = String(meta.waiverTime || meta.waiver_time || '').trim();
+      if (raw) {
+        const valueMatch = raw.match(/(\d+(?:\.\d+)?)/);
+        if (valueMatch && valueMatch[1]) {
+          const value = Number.parseFloat(valueMatch[1]);
+          if (Number.isFinite(value) && value >= 0) {
+            if (/hour/i.test(raw)) return value * 60 * 60 * 1000;
+            if (/day/i.test(raw)) return value * 24 * 60 * 60 * 1000;
+          }
+        }
+        if (/no waivers?/i.test(raw)) return 0;
+      }
+    } catch (err) {
+      console.warn('[Pickups] Unable to determine waiver cooldown from league profile:', (err as Error).message);
+    }
+    // Default safeguard: 48 hours
+    return 48 * 60 * 60 * 1000;
+  }
+
+  private normalizePlayerId(id: string): string | null {
+    const str = String(id || '').trim();
+    if (!str) return null;
+    const match = str.match(/(\d+)$/);
+    return match && match[1] ? match[1] : str;
+  }
+
+  private formatDuration(ms: number): string {
+    const abs = Math.abs(ms);
+    const minutes = Math.round(abs / 60000);
+    if (minutes < 1) return '<1 min';
+    if (minutes < 90) return `${minutes} min`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `${hours} hr${hours === 1 ? '' : 's'}`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'}`;
   }
 
   buildTradeXML(leagueKey: string, myTeamKey: string, decision: TradeDecision): string {
