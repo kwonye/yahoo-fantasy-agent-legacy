@@ -14,6 +14,7 @@ import { GeminiClient } from '../services/GeminiClient';
 import { GeminiLog } from '../services/GeminiLog';
 import { KickoffScheduler } from '../services/KickoffScheduler';
 import { ConfigManager } from '../services/ConfigManager';
+import type { AppSettings } from '../models/Config';
 
 dotenv.config();
 
@@ -65,6 +66,40 @@ function sseBroadcast(event: string, payload: any) {
       // Drop broken clients silently
     }
   }
+}
+
+function configureIncomingTradeWatcher(app: AppSettings): void {
+  try {
+    if (incomingTradeWatcher) {
+      clearInterval(incomingTradeWatcher);
+      incomingTradeWatcher = null;
+    }
+  } catch {}
+  if (!app.tradeResponsesAutomationEnabled) return;
+  const lk = app.leagueKey || '';
+  const tk = app.teamKey || '';
+  if (!lk || !tk) return;
+
+  const intervalMs = 60 * 60 * 1000;
+  let running = false;
+  const runCheck = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const bot = new BotController({ leagueKey: lk, teamKey: tk });
+      await bot.runIncomingTradeCheck();
+    } catch (err) {
+      console.warn('Incoming trade watcher error:', (err as Error).message);
+    } finally {
+      running = false;
+    }
+  };
+
+  void runCheck();
+  incomingTradeWatcher = setInterval(() => {
+    void runCheck();
+  }, intervalMs);
+  console.log('Incoming trade watcher enabled (every 60 min).');
 }
 
 app.use(express.json());
@@ -1532,6 +1567,7 @@ app.post('/api/env', (req, res) => {
     const teamKey = normalizeTeamKeyInput(leagueKey, body.teamKey || s.teamKey || '');
     const redirectUri = String(body.redirectUri || s.redirectUri || '');
     const updated = cm.saveAppSettings({ ...s, leagueKey, teamKey, redirectUri });
+    configureIncomingTradeWatcher(updated);
     res.json({ ok: true, leagueKey: updated.leagueKey, teamKey: updated.teamKey, redirectUri: updated.redirectUri });
   } catch (e) {
     res.status(400).json({ ok: false, error: (e as Error).message });
@@ -1565,6 +1601,7 @@ app.post('/api/schedule', (req, res) => {
       scheduler = null;
       appSettings = new ConfigManager().saveAppSettings({ ...appSettings, scheduleEnabled: false });
     }
+    configureIncomingTradeWatcher(appSettings);
     res.json({ ok: true, schedule: { enabled: appSettings.scheduleEnabled, hour: appSettings.scheduleHour, minute: appSettings.scheduleMinute } });
     sseBroadcast('schedule', { enabled: appSettings.scheduleEnabled, hour: appSettings.scheduleHour, minute: appSettings.scheduleMinute });
   } catch (e) {
@@ -1583,6 +1620,7 @@ app.get('/api/features', (_req, res) => {
     waiverAutomationEnabled: !!app.waiverAutomationEnabled,
     pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
     tradesAutomationEnabled: !!app.tradesAutomationEnabled,
+    tradeResponsesAutomationEnabled: !!app.tradeResponsesAutomationEnabled,
     debugYahooEnabled: !!app.debugYahooEnabled,
     applyChanges: !!app.applyChanges,
   }});
@@ -1641,6 +1679,30 @@ app.post('/api/run/trades', async (req, res) => {
     if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
     const bot = new BotController({ leagueKey, teamKey });
     await bot.runTrades();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+app.post('/api/run/trades/evaluate', async (req, res) => {
+  try {
+    const { leagueKey, teamKey } = resolveKeys(req);
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+    const bot = new BotController({ leagueKey, teamKey });
+    await bot.runTradeEvaluations();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+app.post('/api/run/trades/respond', async (req, res) => {
+  try {
+    const { leagueKey, teamKey } = resolveKeys(req);
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+    const bot = new BotController({ leagueKey, teamKey });
+    await bot.runTradeResponses();
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
@@ -1739,6 +1801,10 @@ app.post('/api/features', (req, res) => {
       app = new ConfigManager().saveAppSettings({ ...app, tradesAutomationEnabled: enableT });
       // No dedicated scheduler; handled in daily runs
     }
+    if (body.tradeResponsesAutomationEnabled !== undefined) {
+      const enableTR = !!body.tradeResponsesAutomationEnabled;
+      app = new ConfigManager().saveAppSettings({ ...app, tradeResponsesAutomationEnabled: enableTR });
+    }
     if (body.debugYahooEnabled !== undefined) {
       const enableD = !!body.debugYahooEnabled;
       app = new ConfigManager().saveAppSettings({ ...app, debugYahooEnabled: enableD });
@@ -1749,12 +1815,14 @@ app.post('/api/features', (req, res) => {
     }
     // Keep in-memory snapshot in sync so /api/env reflects latest values
     try { appSettings = app; } catch {}
+    configureIncomingTradeWatcher(app);
     res.json({ ok: true, features: {
       kickoffEnabled: !!app.kickoffEnabled,
       irAutomationEnabled: !!app.irAutomationEnabled,
       waiverAutomationEnabled: !!app.waiverAutomationEnabled,
       pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
       tradesAutomationEnabled: !!app.tradesAutomationEnabled,
+      tradeResponsesAutomationEnabled: !!app.tradeResponsesAutomationEnabled,
       debugYahooEnabled: !!app.debugYahooEnabled,
       applyChanges: !!app.applyChanges,
     }});
@@ -1820,36 +1888,8 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
       } catch {}
       // Incoming trade watcher (hourly)
       try {
-        if (incomingTradeWatcher) {
-          clearInterval(incomingTradeWatcher);
-          incomingTradeWatcher = null;
-        }
         const app = new ConfigManager().loadAppSettings();
-        if (app.tradesAutomationEnabled) {
-          const lk = app.leagueKey || '';
-          const tk = app.teamKey || '';
-          if (lk && tk) {
-            const intervalMs = 60 * 60 * 1000;
-            let running = false;
-            const runCheck = async () => {
-              if (running) return;
-              running = true;
-              try {
-                const bot = new BotController({ leagueKey: lk, teamKey: tk });
-                await bot.runIncomingTradeCheck();
-              } catch (err) {
-                console.warn('Incoming trade watcher error:', (err as Error).message);
-              } finally {
-                running = false;
-              }
-            };
-            void runCheck();
-            incomingTradeWatcher = setInterval(() => {
-              void runCheck();
-            }, intervalMs);
-            console.log('Incoming trade watcher enabled (every 60 min).');
-          }
-        }
+        configureIncomingTradeWatcher(app);
       } catch {}
     };
 

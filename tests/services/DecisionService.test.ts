@@ -13,6 +13,7 @@ class FakeGemini extends GeminiClient {
   override async optimizeLineup(): Promise<any> { return this.responses.optimizeLineup; }
   override async evaluateWaiver(): Promise<any> { return this.responses.evaluateWaiver; }
   override async evaluateTrade(): Promise<any> { return this.responses.evaluateTrade; }
+  override async evaluateTradesMulti(): Promise<any> { return this.responses.evaluateTradesMulti; }
 }
 
 const baseConfig = {
@@ -67,5 +68,45 @@ describe('DecisionService', () => {
     const svcLowConf = new DecisionService(gem as unknown as GeminiClient, { minConfidence: 0.8 });
     const low = await svcLowConf.decideTrade([], [], { week: 1, season: 2024, leagueSettings: {} as any });
     expect(low.shouldTrade).toBe(false);
+  });
+
+  it('normalizes trade proposals to roster player ids', async () => {
+    const gem = new FakeGemini({
+      evaluateTradesMulti: {
+        shouldTrade: true,
+        reasoning: 'Upgrade WR depth',
+        confidence: 0.9,
+        expectedValue: 5,
+        proposal: {
+          myPlayers: ['Mark Andrews'],
+          theirPlayers: ['Puka Nacua'],
+          targetTeamId: 'nfl.l.1548555.t.4',
+          reasoning: 'Balance rosters',
+        },
+      },
+    });
+
+    const svc = new DecisionService(gem as unknown as GeminiClient, { minConfidence: 0.6 });
+    const myRoster = [
+      { id: '123', name: 'Mark Andrews', position: 'TE', team: 'BAL', status: 'ACTIVE' } as any,
+    ];
+    const opponents = [
+      {
+        teamKey: '461.l.1548555.t.4',
+        teamName: 'Team 4',
+        roster: [{ id: '200', name: 'Puka Nacua', position: 'WR', team: 'LA', status: 'ACTIVE' } as any],
+      },
+    ];
+
+    const res = await svc.decideTradeMulti(myRoster, opponents, {
+      week: 4,
+      season: 2025,
+      leagueSettings: {} as any,
+    });
+
+    expect(res.shouldTrade).toBe(true);
+    expect(res.proposal?.myPlayers).toEqual(['123']);
+    expect(res.proposal?.theirPlayers).toEqual(['200']);
+    expect(res.proposal?.targetTeamId).toBe('461.l.1548555.t.4');
   });
 });

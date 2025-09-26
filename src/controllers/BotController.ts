@@ -86,31 +86,56 @@ export class BotController {
         this.audit.recordAction('pickups_skipped', { reason: 'pickups_automation_disabled' });
       }
       if (app.tradesAutomationEnabled) {
-        // Respect trade deadline if provided in league profile
         try {
           const cfgMgr = new ConfigManager();
           const lp = cfgMgr.loadLeagueProfile(this.leagueKey);
           const dl = (lp as any)?.meta?.tradeEndDate;
           if (dl && new Date(dl).getTime() < Date.now()) {
             this.audit.recordAction('trades_skipped', { reason: 'trade_deadline_passed', deadline: dl });
+          } else if (this.quota.getRemaining() > 0) {
+            await this.evaluateTrades();
           } else {
-            if (this.quota.getRemaining() > 0) await this.evaluateTrades();
-            else this.audit.recordAction('trades_skipped', { reason: 'quota_exhausted_eval' });
-            if (this.quota.getRemaining() > 0) await this.processIncomingTradeOffers();
-            else this.audit.recordAction('trades_incoming_skipped', { reason: 'quota_exhausted_incoming' });
+            this.audit.recordAction('trades_skipped', { reason: 'quota_exhausted_eval' });
           }
         } catch {
           if (this.quota.getRemaining() > 0) await this.evaluateTrades();
-          if (this.quota.getRemaining() > 0) await this.processIncomingTradeOffers();
         }
       } else {
         this.audit.recordAction('trades_skipped', { reason: 'trades_automation_disabled' });
+      }
+
+      if (app.tradeResponsesAutomationEnabled) {
+        if (this.quota.getRemaining() > 0) {
+          await this.processIncomingTradeOffers();
+        } else {
+          this.audit.recordAction('trades_incoming_skipped', { reason: 'quota_exhausted_incoming' });
+        }
+      } else {
+        this.audit.recordAction('trades_incoming_skipped', { reason: 'trade_responses_disabled' });
       }
     });
     this.audit.recordAction('daily_end');
   }
 
   async runIncomingTradeCheck(): Promise<void> {
+    await this.runTradeResponses();
+  }
+
+  async runTradeEvaluations(): Promise<void> {
+    const app = new ConfigManager().loadAppSettings();
+    if (!app.tradesAutomationEnabled) {
+      this.audit.recordAction('trades_skipped', { reason: 'trades_automation_disabled' });
+      return;
+    }
+    await this.evaluateTrades();
+  }
+
+  async runTradeResponses(): Promise<void> {
+    const app = new ConfigManager().loadAppSettings();
+    if (!app.tradeResponsesAutomationEnabled) {
+      this.audit.recordAction('trades_incoming_skipped', { reason: 'trade_responses_disabled' });
+      return;
+    }
     await this.processIncomingTradeOffers();
   }
 
@@ -162,8 +187,8 @@ export class BotController {
 
   // Expose trades automation (evaluate + respond) as a direct action
   async runTrades(): Promise<void> {
-    await this.evaluateTrades();
-    await this.processIncomingTradeOffers();
+    await this.runTradeEvaluations();
+    await this.runTradeResponses();
   }
 
   private async runRosterHygiene() {
@@ -508,7 +533,7 @@ export class BotController {
     try {
       if (!this.decisions) { this.audit.recordAction('trades_incoming_skipped', { reason: 'gemini_unavailable' }); return; }
       const app = new ConfigManager().loadAppSettings();
-      if (!app.tradesAutomationEnabled) { this.audit.recordAction('trades_incoming_skipped', { reason: 'trading_disabled' }); return; }
+      if (!app.tradeResponsesAutomationEnabled) { this.audit.recordAction('trades_incoming_skipped', { reason: 'trade_responses_disabled' }); return; }
       // Respect season trade cap from league profile
       try {
         const cfgMgr = new ConfigManager();

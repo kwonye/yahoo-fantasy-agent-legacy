@@ -41,6 +41,7 @@ const DEFAULT_FEATURES = {
   waiverAutomationEnabled: false,
   pickupsAutomationEnabled: false,
   tradesAutomationEnabled: false,
+  tradeResponsesAutomationEnabled: false,
   debugYahooEnabled: false,
   applyChanges: false,
 };
@@ -615,9 +616,19 @@ export default function AppPage({ initialQuota }: AppPageProps) {
                       <input className="form-check-input" type="checkbox" id="feature-pickups" checked={featureDraft.pickupsAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, pickupsAutomationEnabled: e.target.checked })} />
                       <label className="form-check-label" htmlFor="feature-pickups">Enable Auto Pickups</label>
                     </div>
-                    <div className="form-check form-switch mb-2">
-                      <input className="form-check-input" type="checkbox" id="feature-trades" checked={featureDraft.tradesAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, tradesAutomationEnabled: e.target.checked })} />
-                      <label className="form-check-label" htmlFor="feature-trades">Enable Auto Trades</label>
+                    <div className="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input className="form-check-input" type="checkbox" id="feature-trades" checked={featureDraft.tradesAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, tradesAutomationEnabled: e.target.checked })} />
+                        <label className="form-check-label ms-2" htmlFor="feature-trades">Enable Auto Trade Evaluations</label>
+                      </div>
+                      <button className="btn btn-sm btn-outline-secondary" type="button" onClick={() => handleRun('/api/run/trades/evaluate', 'Trade evaluation')}>Evaluate Trades</button>
+                    </div>
+                    <div className="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input className="form-check-input" type="checkbox" id="feature-trade-responses" checked={featureDraft.tradeResponsesAutomationEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, tradeResponsesAutomationEnabled: e.target.checked })} />
+                        <label className="form-check-label ms-2" htmlFor="feature-trade-responses">Enable Auto Trade Responses</label>
+                      </div>
+                      <button className="btn btn-sm btn-outline-secondary" type="button" onClick={() => handleRun('/api/run/trades/respond', 'Trade responses')}>Respond to Trades</button>
                     </div>
                     <div className="form-check form-switch mb-2">
                       <input className="form-check-input" type="checkbox" id="feature-debug" checked={featureDraft.debugYahooEnabled} onChange={(e) => setFeatureDraft({ ...featureDraft, debugYahooEnabled: e.target.checked })} />
@@ -640,7 +651,8 @@ export default function AppPage({ initialQuota }: AppPageProps) {
                       <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/ir', 'IR hygiene')} type="button">Run IR Hygiene</button>
                       <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/waivers', 'Waivers')} type="button">Run Waivers</button>
                       <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/pickups', 'Pickups')} type="button">Run Pickups</button>
-                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/trades', 'Trades')} type="button">Run Trades</button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/run/trades/evaluate', 'Trade evaluation')} type="button">Evaluate Trades</button>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/run/trades/respond', 'Trade responses')} type="button">Respond to Trades</button>
                     </div>
                   </DashboardCard>
                 </div>

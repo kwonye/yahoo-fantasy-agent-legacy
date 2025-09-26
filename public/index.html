@@ -302,9 +302,16 @@
                     <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
                       <div>
                         <input class="form-check-input" type="checkbox" id="tradesAutomationEnabled" />
-                        <label class="form-check-label ms-2" for="tradesAutomationEnabled">Enable Auto Trades (evaluate/propose/respond during daily run)</label>
+                        <label class="form-check-label ms-2" for="tradesAutomationEnabled">Enable Auto Trade Evaluations (propose trades)</label>
                       </div>
-                      <button class="btn btn-sm btn-outline-secondary" id="runTradesNowBtn" type="button">Run Trades</button>
+                      <button class="btn btn-sm btn-outline-secondary" id="runTradeEvaluationsNowBtn" type="button">Evaluate Trades</button>
+                    </div>
+                    <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
+                      <div>
+                        <input class="form-check-input" type="checkbox" id="tradeResponsesAutomationEnabled" />
+                        <label class="form-check-label ms-2" for="tradeResponsesAutomationEnabled">Enable Auto Trade Responses (incoming offers)</label>
+                      </div>
+                      <button class="btn btn-sm btn-outline-secondary" id="runTradeResponsesNowBtn" type="button">Respond to Trades</button>
                     </div>
                     <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
                       <div>
@@ -557,6 +564,7 @@
           setChk('waiverAutomationEnabled', f.waiverAutomationEnabled);
           setChk('pickupsAutomationEnabled', f.pickupsAutomationEnabled);
           setChk('tradesAutomationEnabled', f.tradesAutomationEnabled);
+          setChk('tradeResponsesAutomationEnabled', f.tradeResponsesAutomationEnabled);
           setChk('debugYahooEnabled', f.debugYahooEnabled);
           setChk('applyChanges', f.applyChanges);
         } catch (e) { console.warn('features load failed', e); }
@@ -1200,7 +1208,8 @@
       const kickoffBtn = document.getElementById('runKickoffNowBtn'); if (kickoffBtn) { kickoffBtn.setAttribute('data-label','Run Kickoff Check'); kickoffBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/kickoff'); }); }
       const irBtn = document.getElementById('runIrNowBtn'); if (irBtn) { irBtn.setAttribute('data-label','Run IR Now'); irBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/ir'); }); }
       const waiversBtn = document.getElementById('runWaiversNowBtn'); if (waiversBtn) { waiversBtn.setAttribute('data-label','Run Waivers'); waiversBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/waivers'); }); }
-      const tradesBtn = document.getElementById('runTradesNowBtn'); if (tradesBtn) { tradesBtn.setAttribute('data-label','Run Trades'); tradesBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/trades'); }); }
+      const tradeEvalBtn = document.getElementById('runTradeEvaluationsNowBtn'); if (tradeEvalBtn) { tradeEvalBtn.setAttribute('data-label','Evaluate Trades'); tradeEvalBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/trades/evaluate'); }); }
+      const tradeRespBtn = document.getElementById('runTradeResponsesNowBtn'); if (tradeRespBtn) { tradeRespBtn.setAttribute('data-label','Respond to Trades'); tradeRespBtn.addEventListener('click', function(){ postRun.call(this, '/api/run/trades/respond'); }); }
       document.getElementById('refreshTradesBtn').addEventListener('click', refreshTrades);
       document.getElementById('dumpTradesBtn').addEventListener('click', async () => {
         const env = await fetchJson('/api/env');
@@ -1235,6 +1244,7 @@
           waiverAutomationEnabled: document.getElementById('waiverAutomationEnabled').checked,
           pickupsAutomationEnabled: document.getElementById('pickupsAutomationEnabled').checked,
           tradesAutomationEnabled: document.getElementById('tradesAutomationEnabled').checked,
+          tradeResponsesAutomationEnabled: document.getElementById('tradeResponsesAutomationEnabled').checked,
           debugYahooEnabled: document.getElementById('debugYahooEnabled').checked,
           applyChanges: document.getElementById('applyChanges').checked,
         };

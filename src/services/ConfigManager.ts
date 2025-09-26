@@ -150,6 +150,7 @@ export class ConfigManager {
       waiverAutomationEnabled: true,
       pickupsAutomationEnabled: false,
       tradesAutomationEnabled: true,
+      tradeResponsesAutomationEnabled: true,
       debugYahooEnabled: false,
       applyChanges: false,
     });
@@ -179,6 +180,7 @@ export class ConfigManager {
       waiverAutomationEnabled: p.waiverAutomationEnabled !== undefined ? !!p.waiverAutomationEnabled : true,
       pickupsAutomationEnabled: p.pickupsAutomationEnabled !== undefined ? !!p.pickupsAutomationEnabled : false,
       tradesAutomationEnabled: p.tradesAutomationEnabled !== undefined ? !!p.tradesAutomationEnabled : true,
+      tradeResponsesAutomationEnabled: p.tradeResponsesAutomationEnabled !== undefined ? !!p.tradeResponsesAutomationEnabled : true,
       debugYahooEnabled: p.debugYahooEnabled !== undefined ? !!p.debugYahooEnabled : false,
       applyChanges: p.applyChanges !== undefined ? !!p.applyChanges : false,
       waiverDay: p.waiverDay !== undefined ? coerce(p.waiverDay, 2) : undefined,

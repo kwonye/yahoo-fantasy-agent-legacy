@@ -18,6 +18,7 @@ export interface AppSettings {
   waiverAutomationEnabled: boolean;
   pickupsAutomationEnabled: boolean;
   tradesAutomationEnabled: boolean;
+  tradeResponsesAutomationEnabled: boolean;
   debugYahooEnabled: boolean;
   // Apply changes flag (when false, operate in dry-run mode)
   applyChanges: boolean;
