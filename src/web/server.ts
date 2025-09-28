@@ -1889,6 +1889,57 @@ app.post('/api/features', (req, res) => {
   }
 });
 
+// Deployment update endpoint - pulls latest code and restarts Docker containers
+app.post('/api/deploy/update', async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    console.log('[Deploy Update] Starting deployment update...');
+    
+    // Step 1: Git pull latest changes
+    console.log('[Deploy Update] Pulling latest changes from origin/main...');
+    const gitResult = await execAsync('git pull origin main');
+    console.log('[Deploy Update] Git pull output:', gitResult.stdout);
+    if (gitResult.stderr && !gitResult.stderr.includes('Already up to date')) {
+      console.warn('[Deploy Update] Git pull warnings/errors:', gitResult.stderr);
+    }
+    
+    // Step 2: Docker compose pull and restart
+    console.log('[Deploy Update] Updating Docker containers...');
+    const pullResult = await execAsync('docker compose pull');
+    console.log('[Deploy Update] Docker pull output:', pullResult.stdout);
+    if (pullResult.stderr) {
+      console.warn('[Deploy Update] Docker pull warnings:', pullResult.stderr);
+    }
+    
+    console.log('[Deploy Update] Restarting Docker containers...');
+    const upResult = await execAsync('docker compose up -d');
+    console.log('[Deploy Update] Docker up output:', upResult.stdout);
+    if (upResult.stderr) {
+      console.warn('[Deploy Update] Docker up warnings:', upResult.stderr);
+    }
+    
+    console.log('[Deploy Update] Deployment update completed successfully');
+    res.json({ 
+      ok: true, 
+      message: 'Deployment updated successfully',
+      details: {
+        git: gitResult.stdout?.trim() || 'No changes',
+        dockerPull: pullResult.stdout?.trim() || 'Completed',
+        dockerUp: upResult.stdout?.trim() || 'Containers restarted'
+      }
+    });
+  } catch (e) {
+    console.error('[Deploy Update] Error during deployment update:', e);
+    res.status(500).json({ 
+      ok: false, 
+      error: `Deployment update failed: ${(e as Error).message}` 
+    });
+  }
+});
+
 export function startServer(portOverride?: number): Promise<http.Server | https.Server> {
   const port = portOverride ?? defaultPort;
   return new Promise((resolve, reject) => {

@@ -172,6 +172,7 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                   <span>Recent Activity</span>
                   <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-warning" id="deployUpdateBtn" title="Pull latest code and restart Docker containers">🚀 Update Deploy</button>
                     <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">Refresh</button>
                     <button class="btn btn-sm btn-outline-danger" id="clearLogsBtn">Clear Activity</button>
                   </div>
@@ -1052,6 +1053,40 @@
       document.getElementById('refreshBtn').addEventListener('click', refresh);
       document.getElementById('refreshGeminiBtn')?.addEventListener('click', refreshGemini);
       document.getElementById('clearGeminiBtn')?.addEventListener('click', async () => { await fetch('/api/gemini/clear', { method: 'POST' }); await refreshGemini(); });
+      document.getElementById('deployUpdateBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('deployUpdateBtn');
+        if (btn) {
+          const originalText = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = '🔄 Updating...';
+        }
+        try {
+          const confirmed = confirm('This will pull the latest code from git and restart the Docker containers. The dashboard may be temporarily unavailable. Continue?');
+          if (!confirmed) {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = originalText;
+            }
+            return;
+          }
+          const r = await fetch('/api/deploy/update', { method: 'POST' });
+          const j = await r.json();
+          if (j.ok) {
+            alert(`Deployment updated successfully!\n\nDetails:\n• Git: ${j.details?.git || 'Updated'}\n• Docker: ${j.details?.dockerUp || 'Restarted'}\n\nThe application may restart momentarily.`);
+            // Refresh after a short delay to allow containers to restart
+            setTimeout(() => window.location.reload(), 2000);
+          } else {
+            alert(`Update failed: ${j.error || 'Unknown error'}`);
+          }
+        } catch (e) {
+          alert(`Update failed: ${e.message || 'Network error'}`);
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+          }
+        }
+      });
       document.getElementById('leagueKeyInput')?.addEventListener('input', updateTeamPrefix);
       // Toggle visibility for Yahoo Client ID/Secret and Gemini API key
       (function(){
