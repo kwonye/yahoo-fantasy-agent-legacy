@@ -342,11 +342,11 @@ export class GeminiClient {
     leagueProfile?: any
   ): Promise<{ shouldAccept: boolean; reasoning: string; confidence: number }>{
     const system = [
-      'You are a fantasy football trade evaluator deciding whether to accept an incoming offer.',
-      'Consider roster needs/surplus, player health, usage trends, upcoming schedule difficulty, and league scoring to judge benefit vs risk.',
-      'Be conservative unless the trade clearly improves expected outcomes. Output valid JSON only.',
-      'Only cite news or injury updates when they appear in the provided context or when retrieved via the Google Search tool.',
-      'You MUST call the Google Search tool before responding and incorporate any relevant findings with the provided data (noting when search yields nothing new).'
+      'You are a fantasy football trade evaluator making binary accept/reject decisions on incoming trade offers.',
+      'Analyze roster needs, player values, health status, usage trends, schedule difficulty, and league scoring.',
+      'Be conservative - only accept trades that clearly improve projected outcomes with reasonable confidence.',
+      'Always search for recent player news/injuries and incorporate findings into your analysis.',
+      'Respond with valid JSON only. Never fabricate data not found in context or search results.'
     ].join('\n');
     const incoming = moves.filter(m => (m.destination || '').includes('.t.') ? (m.destination === myTeamKey || ((): boolean => {
       const idx = myTeamKey.lastIndexOf('.t.'); if (idx <= 0) return false; const myNum = myTeamKey.slice(idx+3); return (m.destination || '').endsWith('.t.'+myNum);
@@ -358,27 +358,59 @@ export class GeminiClient {
     const scoring = lp?.scoring || {};
     const meta = lp?.meta || {};
     const userParts = [
-      'Task: Decide whether to ACCEPT or DECLINE this incoming trade offer.',
-      'Guidelines:',
-      '- Use my needs/surplus, positional scarcity, player health, usage trends, and upcoming schedules to judge value.',
-      '- Decline if the trade increases risk, erodes depth, or fails to improve projected outcomes.',
-      '- Flag salary/keeper or FAAB notes only if present in the data or when retrieved via the Google Search tool; otherwise keep reasoning concise.',
-      '- ALWAYS call the Google Search tool to augment your evaluation, weaving any useful findings into the reasoning while noting when search uncovers nothing new.',
-      '- Output valid JSON only and never fabricate players or metrics.',
-      'Schema: { "shouldAccept": boolean, "reasoning": string, "confidence": number }',
+      'TASK: Evaluate this incoming trade offer and decide to ACCEPT or DECLINE.',
       '',
-      'Needs JSON:', JSON.stringify(needs || [], null, 2),
-      'Surplus JSON:', JSON.stringify(surplus || [], null, 2),
-      'LeagueRosterPositions JSON:', JSON.stringify(leagueSettings?.rosterPositions || {}, null, 2),
-      'LeagueProfileMeta JSON:', JSON.stringify(meta, null, 2),
-      'LeagueScoring JSON:', JSON.stringify(scoring, null, 2),
-      'MyIncomingPlayers JSON:', JSON.stringify(incoming.map(p => ({ id: p.playerId, name: p.name, position: p.position })), null, 2),
-      'MyOutgoingPlayers JSON:', JSON.stringify(outgoing.map(p => ({ id: p.playerId, name: p.name, position: p.position })), null, 2),
-      'Roster Snapshot JSON:', JSON.stringify(myRoster.map(p => ({ id: p.id, name: p.name, position: p.position })), null, 2),
+      'EVALUATION CRITERIA:',
+      '• Compare incoming vs outgoing player values based on league scoring',
+      '• Consider my roster needs/surplus and positional depth',
+      '• Factor in player health, recent usage trends, and upcoming schedules',
+      '• Assess injury risk and performance volatility',
+      '• Weigh keeper/salary implications if present in league profile',
+      '',
+      'DECISION RULES:',
+      '• ACCEPT only if trade clearly improves expected outcomes',
+      '• DECLINE if trade increases risk or reduces roster depth without adequate value return',
+      '• Be conservative - err on the side of declining unless compelling benefit exists',
+      '',
+      'REQUIRED: Search for recent news on all players involved before making your decision.',
+      '',
+      'OUTPUT FORMAT: Respond with valid JSON matching this exact schema:',
+      '{',
+      '  "shouldAccept": boolean,    // true to ACCEPT, false to DECLINE',
+      '  "reasoning": "string",      // concise explanation for your decision',
+      '  "confidence": number        // confidence level 0.0-1.0',
+      '}',
+      '',
+      'DATA:',
+      'My Roster Needs:', JSON.stringify(needs || [], null, 2),
+      'My Roster Surplus:', JSON.stringify(surplus || [], null, 2),
+      'League Roster Positions:', JSON.stringify(leagueSettings?.rosterPositions || {}, null, 2),
+      'League Meta Settings:', JSON.stringify(meta, null, 2),
+      'League Scoring:', JSON.stringify(scoring, null, 2),
+      'Players I Would Receive:', JSON.stringify(incoming.map(p => ({ id: p.playerId, name: p.name, position: p.position })), null, 2),
+      'Players I Would Give Up:', JSON.stringify(outgoing.map(p => ({ id: p.playerId, name: p.name, position: p.position })), null, 2),
+      'Current Roster:', JSON.stringify(myRoster.map(p => ({ id: p.id, name: p.name, position: p.position })), null, 2),
     ];
     const user = userParts.join('\n');
     const text = await this.generate(system, user, { kind: 'incoming-trade-eval', needs, surplus, leagueSettings, moves, leagueProfile });
-    return this.parseJson<{ shouldAccept: boolean; reasoning: string; confidence: number }>(text, 'IncomingTradeDecision');
+    const raw = this.parseJson<any>(text, 'IncomingTradeDecision');
+
+    // Gemini responses occasionally surface booleans as strings ("ACCEPT"/"DECLINE"), numbers, or nested under
+    // alternative field names. Normalize here so downstream automation can safely interpret the result.
+    const shouldAccept = coerceDecision(
+      raw?.shouldAccept, 
+      raw?.decision, 
+      raw?.action, 
+      raw?.recommendation,
+      raw?.accept,
+      raw?.result,
+      raw?.verdict,
+      raw?.choice
+    );
+    const confidence = coerceConfidence(raw?.confidence, raw?.confidenceScore, raw?.score, raw?.certainty);
+    const reasoning = typeof raw?.reasoning === 'string' && raw.reasoning.trim() ? raw.reasoning : 'No reasoning provided';
+
+    return { shouldAccept, reasoning, confidence };
   }
   previewLineupPrompt(
     roster: Player[],
@@ -718,4 +750,57 @@ export class GeminiClient {
   private shouldUseSearch(_kind?: string): boolean {
     return true;
   }
+}
+
+function coerceDecision(...candidates: Array<unknown>): boolean {
+  for (const value of candidates) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') {
+      if (Number.isFinite(value)) return value > 0;
+      continue;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (!normalized) continue;
+      
+      // Explicit accept patterns
+      if (['accept', 'accept trade', 'approve', 'approved', 'yes', 'true', 'buy', 'make trade', 'take', 'do it'].some((token) => normalized === token || normalized.startsWith(`${token} `))) {
+        return true;
+      }
+      
+      // Explicit decline patterns  
+      if (['decline', 'reject', 'rejected', 'deny', 'declined', 'no', 'false', 'hold', 'pass', 'skip', 'avoid'].some((token) => normalized === token || normalized.startsWith(`${token} `))) {
+        return false;
+      }
+      
+      // Context-based patterns
+      if (normalized.includes('accept') && !normalized.includes('decline') && !normalized.includes('reject')) {
+        return true;
+      }
+      if (normalized.includes('decline') || normalized.includes('reject')) {
+        return false;
+      }
+    }
+  }
+  return false; // Default to decline if decision cannot be determined
+}
+
+function coerceConfidence(...candidates: Array<unknown>): number {
+  for (const value of candidates) {
+    let parsed: number | null = null;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      parsed = value;
+    } else if (typeof value === 'string') {
+      const match = value.trim().match(/-?\d+(?:\.\d+)?/);
+      if (match) parsed = parseFloat(match[0]);
+    }
+    if (parsed === null || !Number.isFinite(parsed)) continue;
+    if (parsed > 1) {
+      parsed = parsed > 100 ? 1 : parsed / 100;
+    }
+    if (parsed < 0) parsed = 0;
+    if (parsed > 1) parsed = 1;
+    return parsed;
+  }
+  return 0;
 }

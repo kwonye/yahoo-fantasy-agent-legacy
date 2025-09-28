@@ -164,6 +164,101 @@ export default function AppPage({ initialQuota }: AppPageProps) {
 
   const [isSavingFeatures, setIsSavingFeatures] = useState(false);
   const [isSendingPrompt, setIsSendingPrompt] = useState(false);
+  const [isActivityCollapsed, setActivityCollapsed] = useState(false);
+  const [isGeminiCollapsed, setGeminiCollapsed] = useState(false);
+
+  const renderLiteral = useCallback((value: any) => {
+    if (value === null || value === undefined) return <span className="text-muted">—</span>;
+    if (typeof value === 'string') return <pre className="mono small mb-0">{value}</pre>;
+    if (typeof value === 'number' || typeof value === 'boolean') return <span className="mono small">{String(value)}</span>;
+    if (Array.isArray(value) && value.every((item) => typeof item !== 'object')) {
+      return <span className="mono small">{value.join(', ')}</span>;
+    }
+    return <pre className="mono small mb-0">{JSON.stringify(value, null, 2)}</pre>;
+  }, []);
+
+  const renderActivityDetails = useCallback((event: any) => {
+    if (!event || typeof event !== 'object') return renderLiteral(event);
+
+    if (event.decision && typeof event.decision === 'object') {
+      const { shouldAccept, confidence, reasoning, ...rest } = event.decision;
+      const badges: ReactNode[] = [];
+      if (typeof shouldAccept === 'boolean') {
+        badges.push(<span key="decision" className={`badge ${shouldAccept ? 'bg-success' : 'bg-danger'}`}>{shouldAccept ? 'Accept' : 'Decline'}</span>);
+      }
+      if (typeof confidence === 'number') {
+        const percent = Math.round(confidence * 100);
+        badges.push(<span key="confidence" className="badge bg-light text-dark">Confidence {percent}%</span>);
+      }
+
+      return (
+        <div className="activity-detail small">
+          {badges.length > 0 ? <div className="d-flex flex-wrap gap-2 mb-1">{badges}</div> : null}
+          {reasoning ? <div className="text-muted">{reasoning}</div> : null}
+          {Object.keys(rest || {}).length ? <div className="mt-2">{renderLiteral(rest)}</div> : null}
+        </div>
+      );
+    }
+
+    const rows: Array<[string, any]> = [];
+    if (event.summary) rows.push(['summary', event.summary]);
+    if (event.action) rows.push(['action', event.action]);
+    if (event.request) rows.push(['request', event.request]);
+    if (event.response) rows.push(['response', event.response]);
+    if (event.error) rows.push(['error', event.error]);
+    if (event.details) rows.push(['details', event.details]);
+    if (event.meta) rows.push(['meta', event.meta]);
+
+    if (rows.length === 0) return renderLiteral(event);
+
+    return (
+      <dl className="activity-detail small mb-0">
+        {rows.map(([label, value], idx) => (
+          <div key={`${label}-${idx}`} className="activity-detail-row">
+            <dt>{label}</dt>
+            <dd>{renderLiteral(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }, [renderLiteral]);
+
+  const renderGeminiEntry = useCallback((log: any, idx: number) => {
+    const roles: Array<{ label: string; content: any }> = [
+      { label: 'system', content: log?.system },
+      { label: 'user', content: log?.user },
+      { label: 'assistant', content: log?.response },
+    ].filter((role) => role.content !== undefined && role.content !== null && role.content !== '');
+
+    const extras: Array<[string, any]> = [];
+    if (log?.tools) extras.push(['tools', log.tools]);
+    if (log?.metadata) extras.push(['metadata', log.metadata]);
+
+    return (
+      <article key={idx} className="gemini-entry">
+        <div className="d-flex justify-content-between align-items-center text-muted small mb-2">
+          <span>{formatDateTime(log?.ts)}</span>
+          {log?.model ? <span className="mono">{log.model}</span> : null}
+        </div>
+        {roles.map((role) => (
+          <div key={role.label} className={`gemini-message gemini-${role.label}`}>
+            <span className="badge bg-light text-dark text-uppercase">{role.label}</span>
+            <div className="gemini-bubble">{renderLiteral(role.content)}</div>
+          </div>
+        ))}
+        {extras.length ? (
+          <dl className="activity-detail small mb-0 mt-2">
+            {extras.map(([label, value], extraIdx) => (
+              <div key={`${label}-${extraIdx}`} className="activity-detail-row">
+                <dt>{label}</dt>
+                <dd>{renderLiteral(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </article>
+    );
+  }, [renderLiteral]);
 
   const leagueTeamDisplay = useMemo(() => {
     const league = leagueKeyInput || env.leagueKey;
@@ -242,6 +337,10 @@ export default function AppPage({ initialQuota }: AppPageProps) {
               preMinutes: item.preMinutes,
             });
           });
+        }
+        const tradeEval = map.schedulePreview.tradeEval;
+        if (tradeEval?.enabled && tradeEval.nextRunISO) {
+          tasksList.push({ type: 'Trade Evaluation', runAtISO: tradeEval.nextRunISO, details: `Daily at ${String(tradeEval.hour).padStart(2, '0')}:${String(tradeEval.minute).padStart(2, '0')}` });
         }
         tasksList.sort((a, b) => new Date(a.runAtISO).getTime() - new Date(b.runAtISO).getTime());
         setUpcomingTasks(tasksList);
@@ -357,18 +456,31 @@ export default function AppPage({ initialQuota }: AppPageProps) {
   }, [leagueKeyInput, teamKeyInput, redirectUriInput, refreshAll]);
 
   const handleRun = useCallback(async (endpoint: string, label: string) => {
+    const aliases: Record<string, string> = {
+      '/api/bot/kickoff': '/api/run/kickoff',
+      '/api/bot/ir': '/api/run/ir',
+      '/api/bot/waivers': '/api/run/waivers',
+      '/api/bot/pickups': '/api/run/pickups',
+    };
     const leagueKey = leagueTeamDisplay.league;
     const teamKey = leagueTeamDisplay.team;
     if (!leagueKey || !teamKey) {
       alert('Set league and team keys first');
       return;
     }
-    const result = await fetchJson(endpoint, { method: 'POST', body: JSON.stringify({ leagueKey, teamKey }) }).catch(() => ({ ok: false }));
+    const target = aliases[endpoint] ?? endpoint;
+    const result = await fetchJson(target, { method: 'POST', body: JSON.stringify({ leagueKey, teamKey }) }).catch(() => ({ ok: false }));
+    const outcome = (result as any)?.result?.outcome as string | undefined;
+    const outcomeMessage = (result as any)?.result?.message as string | undefined;
+    const errorMessage = (result as any)?.error as string | undefined;
     if ((result as any)?.ok) {
-      alert(`${label} completed`);
+      const suffix = outcome === 'dry_run' ? ' (dry run)' : '';
+      const extra = outcomeMessage ? `: ${outcomeMessage}` : '';
+      alert(`${label} completed${suffix}${extra}`);
       refreshAll();
     } else {
-      alert(`${label} failed: ${(result as any)?.error || 'unknown'}`);
+      const msg = errorMessage || outcomeMessage || 'unknown';
+      alert(`${label} failed: ${msg}`);
     }
   }, [leagueTeamDisplay, refreshAll]);
 
@@ -664,48 +776,51 @@ export default function AppPage({ initialQuota }: AppPageProps) {
                 <div className="col-12">
                   <DashboardCard title="Recent Activity" subtitle={lastUpdated ? `Last updated ${formatDateTime(lastUpdated)}` : undefined} actions={
                     <div className="d-flex gap-2">
-                      <button className="btn btn-sm btn-outline-secondary" onClick={refreshAll} disabled={isRefreshing}>{isRefreshing ? 'Refreshing…' : 'Refresh'}</button>
-                      <button className="btn btn-sm btn-outline-danger" onClick={handleClearActivity}>Clear Activity</button>
+                      <button className="btn btn-sm btn-outline-secondary" type="button" onClick={() => setActivityCollapsed((prev) => !prev)}>{isActivityCollapsed ? 'Expand' : 'Collapse'}</button>
+                      <button className="btn btn-sm btn-outline-secondary" onClick={refreshAll} disabled={isRefreshing} type="button">{isRefreshing ? 'Refreshing…' : 'Refresh'}</button>
+                      <button className="btn btn-sm btn-outline-danger" onClick={handleClearActivity} type="button">Clear Activity</button>
                     </div>
                   }>
-                    <div className="table-responsive" style={{ maxHeight: 320 }}>
-                      <table className="table table-sm table-striped mono">
-                        <thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead>
-                        <tbody>
-                          {activity.length === 0 ? (
-                            <tr><td colSpan={3} className="text-center text-muted">No activity yet.</td></tr>
-                          ) : activity.map((event, idx) => (
-                            <tr key={idx}>
-                              <td>{formatDateTime(event.ts || event.time)}</td>
-                              <td>{event.type || 'log'}</td>
-                              <td><code>{JSON.stringify(event.decision || event.action || event.error || event.details || event.meta || event)}</code></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {isActivityCollapsed ? (
+                      <div className="text-muted small fst-italic">Activity hidden</div>
+                    ) : (
+                      <div className="table-responsive" style={{ maxHeight: 320 }}>
+                        <table className="table table-sm table-striped align-middle">
+                          <thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead>
+                          <tbody>
+                            {activity.length === 0 ? (
+                              <tr><td colSpan={3} className="text-center text-muted">No activity yet.</td></tr>
+                            ) : activity.map((event, idx) => (
+                              <tr key={idx}>
+                                <td className="mono small">{formatDateTime(event.ts || event.time)}</td>
+                                <td><span className="badge bg-light text-dark text-uppercase">{event.type || 'log'}</span></td>
+                                <td>{renderActivityDetails(event)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </DashboardCard>
                 </div>
 
                 <div className="col-12">
                   <DashboardCard title="Gemini Activity" actions={
                     <div className="d-flex gap-2">
-                      <button className="btn btn-sm btn-outline-secondary" onClick={refreshAll}>Refresh</button>
-                      <button className="btn btn-sm btn-outline-danger" onClick={handleClearGemini}>Clear</button>
+                      <button className="btn btn-sm btn-outline-secondary" type="button" onClick={() => setGeminiCollapsed((prev) => !prev)}>{isGeminiCollapsed ? 'Expand' : 'Collapse'}</button>
+                      <button className="btn btn-sm btn-outline-secondary" onClick={refreshAll} type="button">Refresh</button>
+                      <button className="btn btn-sm btn-outline-danger" onClick={handleClearGemini} type="button">Clear</button>
                     </div>
                   }>
-                    <div className="gemini-log">
-                      {geminiLogs.length === 0 ? (
-                        <div className="text-muted">No logged Gemini conversations yet.</div>
-                      ) : geminiLogs.map((item, idx) => (
-                        <div className="mb-3" key={idx}>
-                          <div className="text-muted small">{formatDateTime(item.ts)}</div>
-                          <div><strong>system</strong>: {item.system}</div>
-                          <div><strong>user</strong>: {item.user}</div>
-                          <div><strong>assistant</strong>: {item.response}</div>
-                        </div>
-                      ))}
-                    </div>
+                    {isGeminiCollapsed ? (
+                      <div className="text-muted small fst-italic">Gemini log hidden</div>
+                    ) : (
+                      <div className="gemini-log">
+                        {geminiLogs.length === 0 ? (
+                          <div className="text-muted">No logged Gemini conversations yet.</div>
+                        ) : geminiLogs.map((item, idx) => renderGeminiEntry(item, idx))}
+                      </div>
+                    )}
                   </DashboardCard>
                 </div>
 
@@ -854,7 +969,19 @@ export default function AppPage({ initialQuota }: AppPageProps) {
         .badge { font-weight: 600; }
         .card { background: #ffffff; border: 1px solid #eadcf8; box-shadow: 0 6px 18px rgba(167,139,250,0.08); border-radius: 14px; }
         .card-header { background: linear-gradient(180deg, #faf5ff, #fff0f7); border-bottom: 1px solid #eadcf8; font-weight: 600; font-size: 14px; border-top-left-radius: 14px; border-top-right-radius: 14px; }
-        .gemini-log { max-height: 260px; overflow: auto; }
+        .gemini-log { max-height: 260px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+        .activity-detail { width: 100%; }
+        .activity-detail-row { display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 4px; }
+        .activity-detail-row:last-of-type { margin-bottom: 0; }
+        .activity-detail-row dt { min-width: 72px; margin-bottom: 0; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.04em; color: #6b7280; }
+        .activity-detail-row dd { margin: 0; flex: 1; }
+        .gemini-entry { border: 1px solid #ede9fe; border-radius: 10px; padding: 12px; background: #faf5ff; }
+        .gemini-message { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+        .gemini-message:last-of-type { margin-bottom: 0; }
+        .gemini-bubble { border-radius: 8px; background: #ffffff; padding: 8px 12px; border: 1px solid #e0e7ff; }
+        .gemini-message.gemini-user .gemini-bubble { background: #e0f2fe; border-color: #bae6fd; }
+        .gemini-message.gemini-assistant .gemini-bubble { background: #ede9fe; border-color: #d8b4fe; }
+        .gemini-message.gemini-system .gemini-bubble { background: #fef3c7; border-color: #fde68a; }
       `}</style>
     </>
   );

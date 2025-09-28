@@ -155,6 +155,12 @@ export class YahooApiService {
     return { success: true, id: data?.transaction?.id };
   }
 
+  async submitAddDropTransactionsXml(leagueKey: string, xml: string): Promise<{ success: boolean; id?: string }> {
+    const path = `/league/${encodeURIComponent(leagueKey)}/transactions;type=add/drop`;
+    const data = await this.postXml(path, xml);
+    return { success: true, id: data?.transaction?.id };
+  }
+
   async proposeTradeXml(leagueKey: string, xml: string): Promise<{ success: boolean; id?: string }> {
     const path = `/league/${encodeURIComponent(leagueKey)}/transactions`;
     const data = await this.postXml(path, xml);
@@ -272,6 +278,8 @@ export class YahooApiService {
       if (!n) return;
       if (Array.isArray(n)) { for (const v of n) visit(v); return; }
       if (typeof n !== 'object') return;
+      const teamKeyValue = (n as any).team_key ?? (n as any).teamKey ?? (n as any).key;
+      if (teamKeyValue) info.id = String(teamKeyValue);
       // Common fields
       if (typeof (n as any).name === 'string') info.name = (n as any).name;
       const fb = (n as any).faab_balance ?? (n as any).faab ?? (n as any).faabBudget ?? (n as any).faab_remaining;

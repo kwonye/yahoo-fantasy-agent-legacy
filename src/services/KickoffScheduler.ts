@@ -3,7 +3,7 @@ export type KickoffTask = () => Promise<void> | void;
 interface WindowDef { dow: number; hh: number; mm: number }
 
 export interface KickoffOptions {
-  preMinutes?: number[]; // e.g., [90, 60, 30]
+  preMinutes?: number[]; // Minutes before kickoff to run checks - defaults to [30] (only 30 minutes before)
   windows?: WindowDef[]; // NFL weekly windows (ET canonical): Thu 20:15, Sun 09:30, Sun 13:00, Sun 16:05, Sun 16:25, Sun 20:20, Mon 20:15
   timeZone?: string; // IANA zone for interpreting kickoff windows (default: America/New_York)
 }
@@ -16,7 +16,7 @@ export class KickoffScheduler {
   constructor(task: KickoffTask, opts: KickoffOptions = {}) {
     this.task = task;
     this.opts = {
-      preMinutes: opts.preMinutes ?? [90, 60, 30],
+      preMinutes: opts.preMinutes ?? [30], // ONLY 30 minutes before kickoff
       windows: opts.windows ?? [
         { dow: 4, hh: 20, mm: 15 }, // Thu Night (TNF) 8:15 PM ET
         { dow: 0, hh: 9,  mm: 30 }, // Sun International window (London/Europe) 9:30 AM ET (occasional)

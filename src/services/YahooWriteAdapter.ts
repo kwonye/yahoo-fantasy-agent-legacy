@@ -153,15 +153,24 @@ export class YahooWriteAdapter {
 
     const payload = this.buildPickupPayload(decision);
     this.dump('pickups', payload);
-    const xml = this.buildPickupXML(leagueKey, myTeamKey, decision);
-    this.dump('pickups.xml', xml);
-    try {
-      const res = await (this.api as any).submitTransactionsXml(leagueKey, xml);
-      return { success: res.success };
-    } catch (e) {
-      console.error('Error submitting pickups XML:', e);
-      return { success: false, error: (e as Error).message };
+
+    const apiAny = this.api as any;
+    const submit = apiAny.submitTransactionsXml.bind(apiAny);
+
+    for (const claim of decision.claims || []) {
+      const singleDecision: WaiverDecision = { ...decision, claims: [claim] };
+      const xml = this.buildPickupXML(leagueKey, myTeamKey, singleDecision);
+      this.dump('pickups.xml', xml);
+      try {
+        const res = await submit(leagueKey, xml);
+        if (!res?.success) return { success: false, error: 'apply_failed' };
+      } catch (e) {
+        console.error('Error submitting pickups XML:', e);
+        return { success: false, error: (e as Error).message };
+      }
     }
+
+    return { success: true };
   }
 
   buildTradePayload(decision: TradeDecision) {
@@ -309,23 +318,34 @@ export class YahooWriteAdapter {
       if (/^\d+$/.test(s)) return `${gameKey}.p.${s}`;
       return s;
     };
-    const items = decision.claims
-      .map((c) => {
-        const addKey = normalizePlayerKey(c.playerId);
-        const dropKey = c.dropPlayerId ? normalizePlayerKey(c.dropPlayerId) : undefined;
-        return `
+    const players = (decision.claims || [])
+      .map((claim) => {
+        const addKey = normalizePlayerKey(claim.playerId);
+        const dropKey = claim.dropPlayerId ? normalizePlayerKey(claim.dropPlayerId) : undefined;
+        const addNode = `
         <player>
           <player_key>${escapeXml(addKey)}</player_key>
           <transaction_data>
             <type>add</type>
             <destination_team_key>${escapeXml(myTeamKey)}</destination_team_key>
           </transaction_data>
-        </player>
-        ${dropKey ? `<player><player_key>${escapeXml(dropKey)}</player_key><transaction_data><type>drop</type><source_team_key>${escapeXml(myTeamKey)}</source_team_key></transaction_data></player>` : ''}`;
+        </player>`;
+        const dropNode = dropKey
+          ? `
+        <player>
+          <player_key>${escapeXml(dropKey)}</player_key>
+          <transaction_data>
+            <type>drop</type>
+            <source_team_key>${escapeXml(myTeamKey)}</source_team_key>
+          </transaction_data>
+        </player>`
+          : '';
+        return `${addNode}${dropNode}`;
       })
       .join('');
-    const ns = " xmlns=\"http://fantasysports.yahooapis.com/fantasy/v2/base.rng\"";
-    return `<?xml version="1.0" encoding="UTF-8"?><fantasy_content${ns}><transaction><type>add/drop</type><players>${items}</players></transaction></fantasy_content>`;
+    const type = (decision.claims || []).some((c) => c.dropPlayerId) ? 'add/drop' : 'add';
+    return `<fantasy_content><transaction><type>${type}</type><players>${players}
+        </players></transaction></fantasy_content>`;
   }
 
   private async ensurePickupEligibility(leagueKey: string, myTeamKey: string, claims: WaiverDecision['claims']): Promise<void> {

@@ -10,54 +10,58 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
       :root {
-        --bg: #fff7fb;            /* pastel pink 50 */
-        --bg-2: #f7f1ff;          /* pastel purple 50 */
-        --fg: #2b2233;            /* deep eggplant for readability */
+        --bg: #f6f3ff;            /* soft lavender */
+        --bg-2: #fff8e6;          /* soft gold glow */
+        --fg: #1f1642;            /* rich royal purple for readability */
         --card: #ffffff;
-        --border: #f0e6f6;
-        --muted: #8b6f9e;
-        --accent-pink: #ff7ab8;
-        --accent-pink-2: #ffc2dd;
-        --accent-purple: #a78bfa;
-        --accent-purple-2: #dec9ff;
-        --danger: #ff8da1;
+        --border: #e6dcff;
+        --muted: #7063a6;
+        --accent-pink: #facc15;   /* repurposed as primary gold accent */
+        --accent-pink-2: #fde68a; /* light gold wash */
+        --accent-purple: #6d28d9;
+        --accent-purple-2: #d8b4fe;
+        --danger: #ef4444;
       }
       body {
         padding: 16px;
-        background: radial-gradient(1200px 600px at 20% -10%, var(--bg) 0%, var(--bg) 60%),
-                    radial-gradient(1000px 500px at 110% 10%, var(--bg-2) 0%, var(--bg-2) 50%),
+        background: radial-gradient(1200px 600px at 20% -10%, rgba(109,40,217,0.12) 0%, rgba(246,243,255,0.85) 60%),
+                    radial-gradient(1000px 500px at 110% 10%, rgba(250,204,21,0.16) 0%, rgba(255,248,230,0.9) 50%),
                     linear-gradient(180deg, var(--bg), var(--bg-2));
         color: var(--fg);
         font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
         font-size: 16px;
       }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 13px; }
-      .navbar { background: linear-gradient(180deg, var(--bg-2), var(--bg)); }
+      .navbar { background: linear-gradient(180deg, rgba(109,40,217,0.15), rgba(250,204,21,0.12)); }
       .navbar-brand { font-weight: 600; color: var(--accent-purple); }
-      .card { background: var(--card); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(167,139,250,0.08); border-radius: 14px; }
-      .card-header { background: linear-gradient(180deg, #faf5ff, #fff0f7); border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+      .card { background: var(--card); border: 1px solid var(--border); box-shadow: 0 6px 22px rgba(109,40,217,0.08); border-radius: 14px; }
+      .card-header { background: linear-gradient(180deg, rgba(109,40,217,0.08), rgba(250,204,21,0.1)); border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; border-top-left-radius: 14px; border-top-right-radius: 14px; }
       .form-control, .form-select { background: #fff; color: var(--fg); border-radius: 10px; border-color: var(--border); }
-      .form-control:focus, .form-select:focus { box-shadow: 0 0 0 .2rem rgba(167,139,250,.18); border-color: var(--accent-purple); }
-      .btn-primary { background: var(--accent-pink); border-color: var(--accent-pink); }
-      .btn-primary:hover { background: #ff6aa7; border-color: #ff6aa7; }
+      .form-control:focus, .form-select:focus { box-shadow: 0 0 0 .2rem rgba(109,40,217,.18); border-color: var(--accent-purple); }
+      .btn-primary { background: var(--accent-pink); border-color: var(--accent-pink); color: #3b2f0b; }
+      .btn-primary:hover { background: #eab308; border-color: #eab308; color: #3b2f0b; }
+      .btn-secondary { background: var(--accent-purple); border-color: var(--accent-purple); }
+      .btn-secondary:hover { background: #5b21b6; border-color: #5b21b6; }
+      .btn-outline-primary { color: var(--accent-pink); border-color: var(--accent-pink); }
+      .btn-outline-primary:hover { background: var(--accent-pink); color: #3b2f0b; }
       .btn-outline-secondary { color: var(--accent-purple); border-color: var(--accent-purple); }
       .btn-outline-secondary:hover { background: var(--accent-purple); color: #fff; }
       .btn-outline-danger { color: var(--danger); border-color: var(--danger); }
       .btn-outline-danger:hover { background: var(--danger); color: #fff; }
       .badge.bg-secondary { background-color: var(--accent-purple-2) !important; color: var(--fg) !important; }
-      .badge.bg-success { background-color: var(--accent-pink-2) !important; color: var(--fg) !important; }
-      .badge.bg-warning { background-color: #ffe6a7 !important; color: #7a5d00 !important; }
-      table.table thead { background: #faf5ff; }
-      table.table tbody tr:hover { background: #fff7fb; }
+      .badge.bg-success { background-color: var(--accent-pink-2) !important; color: #3b2f0b !important; }
+      .badge.bg-warning { background-color: #fcd34d !important; color: #6b4e00 !important; }
+      table.table thead { background: rgba(109,40,217,0.08); }
+      table.table tbody tr:hover { background: rgba(250,204,21,0.08); }
       hr { border-top: 1px dashed var(--accent-purple-2); opacity: 1; }
       #geminiChat pre { white-space: pre-wrap; }
-      .json-pre { background: #fff7fb; border: 1px solid var(--border); border-radius: 10px; padding: 10px; overflow: auto; }
+      .json-pre { background: rgba(109,40,217,0.05); border: 1px solid var(--border); border-radius: 10px; padding: 10px; overflow: auto; }
       .json-pre .key { color: var(--accent-purple); }
-      .json-pre .string { color: #d069a1; }
-      .json-pre .number { color: #c257d3; }
-      .json-pre .boolean { color: #a163df; }
+      .json-pre .string { color: #b45309; }
+      .json-pre .number { color: #d97706; }
+      .json-pre .boolean { color: #a16207; }
       .json-pre .null { color: var(--muted); }
-      .json-pre .punct { color: #b99bd8; }
+      .json-pre .punct { color: #9f7aea; }
     </style>
   </head>
   <body>
@@ -274,7 +278,7 @@
                     <div class="form-check form-switch mb-2 d-flex align-items-center justify-content-between">
                       <div>
                         <input class="form-check-input" type="checkbox" id="kickoffEnabled" />
-                        <label class="form-check-label ms-2" for="kickoffEnabled">Enable Kickoff Checks (90/60/30 pre-windows)</label>
+                        <label class="form-check-label ms-2" for="kickoffEnabled">Enable Kickoff Checks (30 min before kickoff only)</label>
                       </div>
                       <button class="btn btn-sm btn-outline-secondary" id="runKickoffNowBtn" type="button">Run Kickoff Check</button>
                     </div>

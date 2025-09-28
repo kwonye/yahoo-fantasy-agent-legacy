@@ -23,6 +23,7 @@ app.set('trust proxy', true);
 const defaultPort = parseInt(process.env.PORT || '3000', 10);
 let scheduler: Scheduler | null = null;
 let incomingTradeWatcher: NodeJS.Timeout | null = null;
+let tradeEvalScheduler: Scheduler | null = null;
 // runtime state is sourced from AppSettings
 const cmInit = new ConfigManager();
 let appSettings = cmInit.loadAppSettings();
@@ -100,6 +101,31 @@ function configureIncomingTradeWatcher(app: AppSettings): void {
     void runCheck();
   }, intervalMs);
   console.log('Incoming trade watcher enabled (every 60 min).');
+}
+
+function configureTradeEvaluationScheduler(app: AppSettings): void {
+  try {
+    if (tradeEvalScheduler) {
+      tradeEvalScheduler.stop();
+      tradeEvalScheduler = null;
+    }
+  } catch {}
+  try { (global as any).__tradeEval = null; } catch {}
+  if (!app.tradesAutomationEnabled) return;
+  const lk = app.leagueKey || '';
+  const tk = app.teamKey || '';
+  if (!lk || !tk) return;
+
+  const hour = Number.isFinite(app.scheduleHour) ? app.scheduleHour : 9;
+  const minute = Number.isFinite(app.scheduleMinute) ? app.scheduleMinute : 0;
+  const task = async () => {
+    const bot = new BotController({ leagueKey: lk, teamKey: tk });
+    await bot.runTradeEvaluations();
+  };
+  tradeEvalScheduler = new Scheduler(task, { hour, minute, runOnStart: false });
+  tradeEvalScheduler.start();
+  try { (global as any).__tradeEval = tradeEvalScheduler; } catch {}
+  console.log(`Trade evaluation scheduler enabled (daily at ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}).`);
 }
 
 app.use(express.json());
@@ -346,7 +372,7 @@ app.get('/api/schedule/preview', (_req, res) => {
     }
     // Kickoff pre-checks schedule (next few occurrences)
     const kickoffEnabled = !!app.kickoffEnabled;
-    const preMinutes = [90, 60, 30];
+    const preMinutes = [30]; // ONLY run 30 minutes before kickoff
     const windows = [
       { dow: 4, hh: 20, mm: 20 },
       { dow: 0, hh: 13, mm: 0 },
@@ -386,7 +412,21 @@ app.get('/api/schedule/preview', (_req, res) => {
       // Sort by soonest and keep next ~10
       upcoming.sort((a, b) => new Date(a.runAtISO).getTime() - new Date(b.runAtISO).getTime());
     }
-    res.json({ ok: true, waiver, kickoff: { enabled: kickoffEnabled, preMinutes, upcoming } });
+    const tradeEvalEnabled = !!app.tradesAutomationEnabled;
+    let tradeEval: any = { enabled: tradeEvalEnabled };
+    if (tradeEvalEnabled) {
+      const next = (() => {
+        const now = new Date();
+        const d = new Date(now);
+        const hour = Number.isFinite(app.scheduleHour) ? app.scheduleHour : 9;
+        const minute = Number.isFinite(app.scheduleMinute) ? app.scheduleMinute : 0;
+        d.setHours(hour, minute, 0, 0);
+        if (d <= now) d.setDate(d.getDate() + 1);
+        return d;
+      })();
+      tradeEval = { enabled: true, hour: app.scheduleHour, minute: app.scheduleMinute, nextRunISO: next.toISOString() };
+    }
+    res.json({ ok: true, waiver, kickoff: { enabled: kickoffEnabled, preMinutes, upcoming }, tradeEval });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
@@ -1568,6 +1608,7 @@ app.post('/api/env', (req, res) => {
     const redirectUri = String(body.redirectUri || s.redirectUri || '');
     const updated = cm.saveAppSettings({ ...s, leagueKey, teamKey, redirectUri });
     configureIncomingTradeWatcher(updated);
+    configureTradeEvaluationScheduler(updated);
     res.json({ ok: true, leagueKey: updated.leagueKey, teamKey: updated.teamKey, redirectUri: updated.redirectUri });
   } catch (e) {
     res.status(400).json({ ok: false, error: (e as Error).message });
@@ -1602,6 +1643,7 @@ app.post('/api/schedule', (req, res) => {
       appSettings = new ConfigManager().saveAppSettings({ ...appSettings, scheduleEnabled: false });
     }
     configureIncomingTradeWatcher(appSettings);
+    configureTradeEvaluationScheduler(appSettings);
     res.json({ ok: true, schedule: { enabled: appSettings.scheduleEnabled, hour: appSettings.scheduleHour, minute: appSettings.scheduleMinute } });
     sseBroadcast('schedule', { enabled: appSettings.scheduleEnabled, hour: appSettings.scheduleHour, minute: appSettings.scheduleMinute });
   } catch (e) {
@@ -1668,6 +1710,20 @@ app.post('/api/run/waivers', async (req, res) => {
     const bot = new BotController({ leagueKey, teamKey });
     await bot.runWaivers();
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+app.post('/api/run/pickups', async (req, res) => {
+  try {
+    const { leagueKey, teamKey } = resolveKeys(req);
+    if (!leagueKey || !teamKey) { res.status(400).json({ ok: false, error: 'Missing leagueKey or teamKey' }); return; }
+    const bot = new BotController({ leagueKey, teamKey });
+    const result = await bot.runPickups();
+    const isError = result.outcome === 'error';
+    const isSuccess = result.outcome === 'applied' || result.outcome === 'dry_run';
+    res.status(isError ? 500 : 200).json({ ok: isSuccess, result, error: result.error ?? (isSuccess ? undefined : result.message) });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
@@ -1765,6 +1821,7 @@ app.post('/api/features', (req, res) => {
           const ko = new (require('../services/KickoffScheduler').KickoffScheduler)(task);
           ko.start();
           (global as any).__kickoff = ko;
+          console.log('Kickoff scheduler enabled (pre: 30 min only).');
         }
       }
     }
@@ -1799,7 +1856,7 @@ app.post('/api/features', (req, res) => {
     if (body.tradesAutomationEnabled !== undefined) {
       const enableT = !!body.tradesAutomationEnabled;
       app = new ConfigManager().saveAppSettings({ ...app, tradesAutomationEnabled: enableT });
-      // No dedicated scheduler; handled in daily runs
+      // Scheduler configuration handled below
     }
     if (body.tradeResponsesAutomationEnabled !== undefined) {
       const enableTR = !!body.tradeResponsesAutomationEnabled;
@@ -1816,6 +1873,7 @@ app.post('/api/features', (req, res) => {
     // Keep in-memory snapshot in sync so /api/env reflects latest values
     try { appSettings = app; } catch {}
     configureIncomingTradeWatcher(app);
+    configureTradeEvaluationScheduler(app);
     res.json({ ok: true, features: {
       kickoffEnabled: !!app.kickoffEnabled,
       irAutomationEnabled: !!app.irAutomationEnabled,
@@ -1854,7 +1912,7 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
             const ko = new KickoffScheduler(task);
             ko.start();
             (global as any).__kickoff = ko;
-            console.log('Kickoff scheduler enabled (pre: 90/60/30 min).');
+            console.log('Kickoff scheduler enabled (pre: 30 min only).');
           }
         }
       } catch {}
@@ -1890,6 +1948,7 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
       try {
         const app = new ConfigManager().loadAppSettings();
         configureIncomingTradeWatcher(app);
+        configureTradeEvaluationScheduler(app);
       } catch {}
     };
 

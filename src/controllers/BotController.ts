@@ -17,6 +17,13 @@ export interface BotControllerOptions {
   teamKey: string;
 }
 
+type PickupsProcessResult = {
+  outcome: 'applied' | 'dry_run' | 'skipped' | 'error';
+  message?: string;
+  error?: string;
+  claims?: any[];
+};
+
 export class BotController {
   private readonly yahoo: YahooApiService;
   private readonly decisions: DecisionService | null;
@@ -27,6 +34,17 @@ export class BotController {
   private readonly teamKey: string;
   private readonly write: YahooWriteAdapter;
   private readonly quota: GeminiQuota;
+  private canonicalLeagueKey: string;
+  private canonicalTeamKey: string;
+  private canonicalKeysResolved: boolean;
+  
+  // Roster balance cache (to avoid calling analyzeRosterBalance every hour)
+  private rosterBalanceCache: {
+    needs: string[];
+    surplus: string[];
+    reasoning: string;
+    timestamp: number;
+  } | null = null;
 
   constructor(opts: BotControllerOptions) {
     const cfgMgr = new ConfigManager();
@@ -55,6 +73,104 @@ export class BotController {
     this.leagueKey = opts.leagueKey;
     this.teamKey = opts.teamKey;
     this.quota = new GeminiQuota();
+    this.canonicalLeagueKey = opts.leagueKey;
+    this.canonicalTeamKey = opts.teamKey;
+    this.canonicalKeysResolved = this.isCanonicalKey(this.canonicalLeagueKey, 'league') && this.isCanonicalKey(this.canonicalTeamKey, 'team');
+  }
+
+  private isCanonicalKey(value: string | undefined, kind: 'league' | 'team'): boolean {
+    if (!value) return false;
+    const normalized = String(value).trim();
+    if (!normalized) return false;
+    if (kind === 'league') return /^\d+\.l\.\d+$/i.test(normalized);
+    if (kind === 'team') return /^\d+\.l\.\d+\.t\.\d+$/i.test(normalized);
+    return false;
+  }
+
+  private setCanonicalKeys(keys: { leagueKey?: string | null; teamKey?: string | null }): void {
+    if (keys.leagueKey) {
+      this.canonicalLeagueKey = String(keys.leagueKey).trim();
+    }
+    if (keys.teamKey) {
+      this.canonicalTeamKey = String(keys.teamKey).trim();
+    }
+    if (this.isCanonicalKey(this.canonicalLeagueKey, 'league') && this.isCanonicalKey(this.canonicalTeamKey, 'team')) {
+      this.canonicalKeysResolved = true;
+    }
+  }
+
+  private async ensureCanonicalKeys(): Promise<void> {
+    if (this.canonicalKeysResolved) return;
+    try {
+      const league = await this.yahoo.getLeague(this.leagueKey);
+      this.setCanonicalKeys({ leagueKey: league?.id });
+    } catch {}
+    if (!this.canonicalKeysResolved) {
+      try {
+        const teamInfo = await this.yahoo.getTeamInfo(this.teamKey);
+        this.setCanonicalKeys({ teamKey: teamInfo?.id });
+      } catch {}
+    }
+  }
+
+  private getLeagueKeyForWrites(): string {
+    return (this.isCanonicalKey(this.canonicalLeagueKey, 'league') ? this.canonicalLeagueKey : this.leagueKey) ?? this.leagueKey;
+  }
+
+  private getTeamKeyForWrites(): string {
+    return (this.isCanonicalKey(this.canonicalTeamKey, 'team') ? this.canonicalTeamKey : this.teamKey) ?? this.teamKey;
+  }
+
+  // Roster balance cache management methods
+  private isRosterBalanceCacheValid(): boolean {
+    if (!this.rosterBalanceCache) return false;
+    
+    // Consider cache valid for 23 hours to ensure it refreshes at least once daily
+    const cacheAgeMs = Date.now() - this.rosterBalanceCache.timestamp;
+    const maxAgeMs = 23 * 60 * 60 * 1000; // 23 hours
+    
+    return cacheAgeMs < maxAgeMs;
+  }
+
+  private async getRosterBalance(roster: any[], leagueSettings: any): Promise<{ needs: string[]; surplus: string[]; reasoning: string }> {
+    // Return cached result if valid
+    if (this.isRosterBalanceCacheValid()) {
+      this.audit.recordAction('roster_balance_cache_hit');
+      return {
+        needs: this.rosterBalanceCache!.needs,
+        surplus: this.rosterBalanceCache!.surplus,
+        reasoning: this.rosterBalanceCache!.reasoning
+      };
+    }
+
+    // Cache miss - perform fresh analysis
+    this.audit.recordAction('roster_balance_cache_miss');
+    let needs: string[] = [];
+    let surplus: string[] = [];
+    let reasoning = 'Computed via heuristic';
+
+    try {
+      if (this.decisions) {
+        const gemini = new (require('../services/GeminiClient').GeminiClient)();
+        const out = await gemini.analyzeRosterBalance(roster, leagueSettings);
+        needs = Array.isArray(out.needs) ? out.needs : [];
+        surplus = Array.isArray(out.surplus) ? out.surplus : [];
+        reasoning = out.reasoning || reasoning;
+      }
+    } catch {
+      // Fall back to heuristic if Gemini fails
+      this.audit.recordAction('roster_balance_gemini_fallback');
+    }
+
+    // Update cache
+    this.rosterBalanceCache = {
+      needs,
+      surplus,
+      reasoning,
+      timestamp: Date.now()
+    };
+
+    return { needs, surplus, reasoning };
   }
 
   async runDaily(): Promise<void> {
@@ -62,6 +178,20 @@ export class BotController {
     await this.metrics.time('dailyRun', async () => {
       const cfgMgr0 = new ConfigManager();
       const app = cfgMgr0.loadAppSettings();
+      
+      // Refresh roster balance cache at the start of daily run
+      try {
+        await this.ensureCanonicalKeys();
+        const league = await this.yahoo.getLeague(this.leagueKey);
+        this.setCanonicalKeys({ leagueKey: league?.id });
+        const myEntries = await this.yahoo.getTeamRosterWithSlots(this.teamKey);
+        const myRoster = myEntries.map((e) => e.player);
+        await this.getRosterBalance(myRoster, league.settings);
+        this.audit.recordAction('roster_balance_cache_refreshed');
+      } catch (e) {
+        this.audit.recordAction('roster_balance_cache_refresh_failed', { error: (e as Error).message });
+      }
+      
       await this.runRosterHygiene();
       // Game-day awareness: on Thu/Sun/Mon, rely on kickoff checks for lineup to save budget
       const dow = new Date().getDay(); // 0 Sun ... 6 Sat
@@ -140,44 +270,86 @@ export class BotController {
   }
 
   // Evaluate immediate free-agent pickups and apply add/drops (strict drop enforcement when roster full)
-  private async processPickups() {
+  private async processPickups(): Promise<PickupsProcessResult> {
     try {
-      if (!this.decisions) { this.audit.recordAction('pickups_skipped', { reason: 'gemini_unavailable' }); return; }
+      if (!this.decisions) {
+        this.audit.recordAction('pickups_skipped', { reason: 'gemini_unavailable' });
+        return { outcome: 'skipped', message: 'gemini_unavailable' };
+      }
+
       this.audit.recordAction('pickups_start');
       const league = await this.yahoo.getLeague(this.leagueKey);
       const teamInfo = await this.yahoo.getTeamInfo(this.teamKey);
-      const available = await this.yahoo.getFreeAgents(this.leagueKey, 50);
-      if (!Array.isArray(available) || available.length === 0) { this.audit.recordAction('pickups_skipped', { reason: 'no_available_players' }); return; }
-      const entries = await this.yahoo.getTeamRosterWithSlots(this.teamKey);
+      this.setCanonicalKeys({ leagueKey: league?.id, teamKey: teamInfo?.id });
+
+      const available = await this.yahoo.getFreeAgents(this.getLeagueKeyForWrites(), 50);
+      if (!Array.isArray(available) || available.length === 0) {
+        this.audit.recordAction('pickups_skipped', { reason: 'no_available_players' });
+        return { outcome: 'skipped', message: 'no_available_players' };
+      }
+
+      const entries = await this.yahoo.getTeamRosterWithSlots(this.getTeamKeyForWrites());
       const myRoster = entries.map((e) => e.player);
-      const decision = await (this.decisions as any).gemini.evaluateImmediatePickups(available, myRoster, 2, { week: league.currentWeek, season: league.season, leagueSettings: league.settings });
-      // Enforce strict drops if roster full
+      const decision = await (this.decisions as any).gemini.evaluateImmediatePickups(
+        available,
+        myRoster,
+        2,
+        { week: league.currentWeek, season: league.season, leagueSettings: league.settings }
+      );
+
       const rp: Record<string, number> = (league?.settings?.rosterPositions || {}) as any;
-      const cap = Object.entries(rp).reduce((sum, [pos, cnt]) => { const up = String(pos || '').toUpperCase(); if (up==='IR') return sum; const n=Number(cnt); return sum + (Number.isFinite(n)?n:0); }, 0);
+      const cap = Object.entries(rp).reduce((sum, [pos, cnt]) => {
+        const up = String(pos || '').toUpperCase();
+        if (up === 'IR') return sum;
+        const n = Number(cnt);
+        return sum + (Number.isFinite(n) ? n : 0);
+      }, 0);
       const nonIrCount = entries.filter((e: any) => String(e.slot || '').toUpperCase() !== 'IR').length;
       const rosterFull = nonIrCount >= cap && cap > 0;
       const write = this.write;
+
       if (rosterFull) {
-        // If any missing, skip to avoid Yahoo rejection
         const missing = (decision.claims || []).some((c: any) => !c.dropPlayerId);
-        if (missing) { this.audit.recordAction('pickups_skipped', { reason: 'missing_drops' }); return; }
+        if (missing) {
+          this.audit.recordAction('pickups_skipped', { reason: 'missing_drops' });
+          return { outcome: 'skipped', message: 'missing_drops' };
+        }
       }
+
+      if (!decision.claims || decision.claims.length === 0) {
+        this.audit.recordAction('pickups_skipped', { reason: 'no_recommendations' });
+        return { outcome: 'skipped', message: 'no_recommendations' };
+      }
+
       const app = new ConfigManager().loadAppSettings();
-      if (app.applyChanges && (decision.claims || []).length > 0) {
-        const res = await write.applyPickups(this.leagueKey, this.teamKey, decision as any);
+      if (app.applyChanges) {
+        const res = await write.applyPickups(this.getLeagueKeyForWrites(), this.getTeamKeyForWrites(), decision as any);
         this.audit.recordAction(res.success ? 'pickups_applied' : 'pickups_apply_failed', { claims: decision.claims });
-      } else {
-        this.audit.recordAction('pickups_dry_run', { claims: decision.claims });
+        if (res.success) {
+          this.audit.recordAction('pickups_end');
+          return { outcome: 'applied', claims: decision.claims };
+        }
+        this.audit.recordAction('pickups_unavailable', { error: res.error || 'apply_failed' });
+        return { outcome: 'error', error: res.error || 'apply_failed', claims: decision.claims };
       }
+
+      this.audit.recordAction('pickups_dry_run', { claims: decision.claims });
       this.audit.recordAction('pickups_end');
+      return { outcome: 'dry_run', claims: decision.claims };
     } catch (e) {
-      this.audit.recordAction('pickups_unavailable', { error: (e as Error).message });
+      const message = (e as Error).message;
+      this.audit.recordAction('pickups_unavailable', { error: message });
+      return { outcome: 'error', error: message };
     }
   }
 
   // Public wrapper for weekly waiver scheduler
   async runWaivers(): Promise<void> {
     await this.processWaivers();
+  }
+
+  async runPickups(): Promise<PickupsProcessResult> {
+    return this.processPickups();
   }
 
   // Expose IR hygiene as a direct action
@@ -193,6 +365,7 @@ export class BotController {
 
   private async runRosterHygiene() {
     try {
+      await this.ensureCanonicalKeys();
       const app = new ConfigManager().loadAppSettings();
       if (!app.irAutomationEnabled) {
         this.audit.recordAction('hygiene_skipped', { reason: 'ir_automation_disabled' });
@@ -200,6 +373,7 @@ export class BotController {
       }
       this.audit.recordAction('hygiene_start');
       const league = await this.yahoo.getLeague(this.leagueKey);
+      this.setCanonicalKeys({ leagueKey: league?.id });
       const lpMgr = new ConfigManager();
       const leagueProfile = lpMgr.loadLeagueProfile(this.leagueKey);
       const cfgMgr2 = new ConfigManager();
@@ -214,7 +388,7 @@ export class BotController {
       }
       const apply = app.applyChanges === true;
       if (apply) {
-        const res = await this.write.applyAssignments(this.teamKey, assignments as any);
+        const res = await this.write.applyAssignments(this.getTeamKeyForWrites(), assignments as any);
         this.audit.recordAction(res.success ? 'hygiene_applied' : 'hygiene_apply_failed', { count: assignments.length });
       } else {
         this.audit.recordAction('hygiene_dry_run', { count: assignments.length });
@@ -228,9 +402,11 @@ export class BotController {
 
   private async optimizeLineup() {
     try {
+      await this.ensureCanonicalKeys();
       if (!this.decisions) { this.audit.recordAction('lineup_skipped', { reason: 'gemini_unavailable' }); return; }
       this.audit.recordAction('lineup_opt_start');
       const league = await this.yahoo.getLeague(this.leagueKey);
+      this.setCanonicalKeys({ leagueKey: league?.id });
       const cfgMgr = new ConfigManager();
       const leagueProfile = cfgMgr.loadLeagueProfile(this.leagueKey);
       // Prefer slot-aware entries; fall back to basic roster if needed (e.g., in tests)
@@ -270,7 +446,7 @@ export class BotController {
       const apply = (this.decisions as any)['config']?.applyChanges === true;
       if (apply) {
         try {
-          await this.write.applyLineup(this.teamKey, lineup.recommendedLineup);
+          await this.write.applyLineup(this.getTeamKeyForWrites(), lineup.recommendedLineup);
           decision.executed = true;
           decision.outcome = 'Lineup updated';
           this.audit.recordAction('lineup_applied', { changes: lineup.changes });
@@ -295,12 +471,14 @@ export class BotController {
 
   private async processWaivers() {
     try {
+      await this.ensureCanonicalKeys();
       if (!this.decisions) { this.audit.recordAction('waivers_skipped', { reason: 'gemini_unavailable' }); return; }
       this.audit.recordAction('waivers_start');
       const league = await this.yahoo.getLeague(this.leagueKey);
+      this.setCanonicalKeys({ leagueKey: league?.id });
       const cfgMgr = new ConfigManager();
       const leagueProfile = cfgMgr.loadLeagueProfile(this.leagueKey);
-      const ww = await this.yahoo.getWaiverWirePlayers(this.leagueKey);
+      const ww = await this.yahoo.getWaiverWirePlayers(this.getLeagueKeyForWrites());
       if (!Array.isArray(ww) || ww.length === 0) {
         this.audit.recordAction('waivers_skipped', { reason: 'no_candidates' });
         return;
@@ -309,6 +487,7 @@ export class BotController {
       let faabRemain: number | undefined;
       try {
         const ti = await this.yahoo.getTeamInfo(this.teamKey);
+        this.setCanonicalKeys({ teamKey: ti?.id });
         if (Number.isFinite(Number(ti.faabBalance))) faabRemain = Number(ti.faabBalance);
       } catch {}
 
@@ -372,7 +551,7 @@ export class BotController {
         const applyW = app.applyChanges === true;
         if (applyW) {
           try {
-            const out = await this.write.applyWaivers(this.leagueKey, this.teamKey, res);
+            const out = await this.write.applyWaivers(this.getLeagueKeyForWrites(), this.getTeamKeyForWrites(), res);
             const decision: BotDecision = {
               id: `waivers-${Date.now()}`,
               type: DecisionType.WAIVER_CLAIM,
@@ -426,9 +605,11 @@ export class BotController {
 
   private async evaluateTrades() {
     try {
+      await this.ensureCanonicalKeys();
       if (!this.decisions) { this.audit.recordAction('trades_skipped', { reason: 'gemini_unavailable' }); return; }
       this.audit.recordAction('trades_start');
       const league = await this.yahoo.getLeague(this.leagueKey);
+      this.setCanonicalKeys({ leagueKey: league?.id });
       const cfgMgr = new ConfigManager();
       const leagueProfile = cfgMgr.loadLeagueProfile(this.leagueKey);
       // Check season trade cap
@@ -491,7 +672,7 @@ export class BotController {
       const applyT = app.applyChanges === true;
       if (applyT) {
         try {
-          const out = await this.write.applyTrade(this.leagueKey, this.teamKey, res);
+          const out = await this.write.applyTrade(this.getLeagueKeyForWrites(), this.getTeamKeyForWrites(), res);
           const decision: BotDecision = {
             id: `trade-${Date.now()}`,
             type: DecisionType.TRADE_PROPOSAL,
@@ -531,6 +712,7 @@ export class BotController {
   // Check incoming trade offers and auto-respond per thresholds
   private async processIncomingTradeOffers() {
     try {
+      await this.ensureCanonicalKeys();
       if (!this.decisions) { this.audit.recordAction('trades_incoming_skipped', { reason: 'gemini_unavailable' }); return; }
       const app = new ConfigManager().loadAppSettings();
       if (!app.tradeResponsesAutomationEnabled) { this.audit.recordAction('trades_incoming_skipped', { reason: 'trade_responses_disabled' }); return; }
@@ -550,20 +732,17 @@ export class BotController {
       } catch {}
       const offers = await this.yahoo.getPendingTrades(this.leagueKey);
       if (!Array.isArray(offers) || offers.length === 0) { this.audit.recordAction('trades_incoming_none'); return; }
-      // Compute needs/surplus via Gemini
+      // Compute needs/surplus via cached analysis
       const league = await this.yahoo.getLeague(this.leagueKey);
+      this.setCanonicalKeys({ leagueKey: league?.id });
       const lpMgr = new ConfigManager();
       const leagueProfile = lpMgr.loadLeagueProfile(this.leagueKey);
       const myEntries = await this.yahoo.getTeamRosterWithSlots(this.teamKey);
       const myRoster = myEntries.map((e) => e.player);
-      let needs: string[] = [];
-      let surplus: string[] = [];
-      try {
-        const gemini = new (require('../services/GeminiClient').GeminiClient)();
-        const out = await gemini.analyzeRosterBalance(myRoster, league.settings);
-        needs = Array.isArray(out.needs) ? out.needs : [];
-        surplus = Array.isArray(out.surplus) ? out.surplus : [];
-      } catch {}
+      
+      // Use cached roster balance analysis to avoid calling Gemini every hour
+      const { needs, surplus } = await this.getRosterBalance(myRoster, league.settings);
+      
       const gemini = new (require('../services/GeminiClient').GeminiClient)();
       // Limit number of offers evaluated by remaining budget
       let remaining = this.quota.getRemaining();
@@ -587,7 +766,7 @@ export class BotController {
         const app = new ConfigManager().loadAppSettings();
         const apply = app.applyChanges === true;
         if (apply) {
-          const res = await this.write.applyTradeResponse(this.leagueKey, tradeId, accept);
+          const res = await this.write.applyTradeResponse(this.getLeagueKeyForWrites(), tradeId, accept);
           this.audit.recordAction(res.success ? (accept ? 'trade_auto_accepted' : 'trade_auto_declined') : 'trade_auto_response_failed', { tradeId });
         } else {
           this.audit.recordAction(accept ? 'trade_auto_accept_dry_run' : 'trade_auto_decline_dry_run', { tradeId });
