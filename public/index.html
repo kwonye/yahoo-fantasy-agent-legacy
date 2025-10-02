@@ -132,7 +132,7 @@
                         <button id="toggleGApiKey" type="button" class="btn btn-outline-secondary">Show</button>
                       </div>
                     </div>
-                    <div class="mb-2"><label class="form-label">Gemini Model</label><input id="gModel" class="form-control form-control-sm" placeholder="gemini-2.5-pro" /></div>
+                    <div class="mb-2"><label class="form-label">Gemini Model</label><input id="gModel" class="form-control form-control-sm" placeholder="gemini-2.5-flash" /></div>
                     <button type="submit" class="btn btn-sm btn-secondary">Save Gemini Settings</button>
                   </form>
                   <hr/>
@@ -594,11 +594,11 @@
               if (secEl && document.activeElement !== secEl && secEl.value !== (raw.clientSecret || '')) secEl.value = raw.clientSecret || '';
             }
           } catch (e) { /* ignore */ }
-          // Autofill Gemini model input if empty, defaulting to gemini-2.5-pro
+          // Autofill Gemini model input if empty, defaulting to gemini-2.5-flash
           try {
             const gm = document.getElementById('gModel');
             if (gm && !gm.value) {
-              const m = creds?.creds?.gemini?.model || 'gemini-2.5-pro';
+              const m = creds?.creds?.gemini?.model || 'gemini-2.5-flash';
               gm.value = m;
             }
           } catch (e) { /* ignore */ }
@@ -609,7 +609,7 @@
               const keyEl = document.getElementById('gApiKey');
               const modelEl = document.getElementById('gModel');
               if (keyEl && document.activeElement !== keyEl && keyEl.value !== (rawG.apiKey || '')) keyEl.value = rawG.apiKey || '';
-              if (modelEl && !modelEl.value) modelEl.value = rawG.model || (creds?.creds?.gemini?.model) || 'gemini-2.5-pro';
+              if (modelEl && !modelEl.value) modelEl.value = rawG.model || (creds?.creds?.gemini?.model) || 'gemini-2.5-flash';
             }
           } catch (e) { /* ignore */ }
           // Get features data for mode badge
@@ -1014,7 +1014,7 @@
         e.preventDefault();
         const body = { 
           apiKey: document.getElementById('gApiKey').value,
-          model: (document.getElementById('gModel') || {}).value || 'gemini-2.5-pro'
+          model: (document.getElementById('gModel') || {}).value || 'gemini-2.5-flash'
         };
         const r = await fetch('/api/creds/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const j = await r.json();

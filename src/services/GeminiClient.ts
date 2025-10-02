@@ -8,7 +8,7 @@ import { GoogleGenAI } from '@google/genai';
 
 export interface GeminiClientOptions {
   apiKey?: string;
-  model?: string; // e.g., gemini-2.5-pro
+  model?: string; // e.g., gemini-2.5-flash
   baseUrl?: string; // e.g., https://generativelanguage.googleapis.com/v1beta
 }
 
@@ -35,7 +35,7 @@ export class GeminiClient {
     if (!model) {
       try { const cm = new ConfigManager(); const creds = cm.loadGeminiCredentials(); model = creds?.model; } catch {}
     }
-    this.model = model || 'gemini-2.5-pro';
+    this.model = model || 'gemini-2.5-flash';
     this.quota = new GeminiQuota();
     this.genAI = new GoogleGenAI({
       apiKey: this.apiKey,

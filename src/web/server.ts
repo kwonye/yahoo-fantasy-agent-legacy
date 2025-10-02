@@ -451,7 +451,7 @@ app.get('/api/creds', (_req, res) => {
     // Do not fallback to environment for Gemini API key; require saving via dashboard
     const responseData = { ok: true, creds: {
       yahoo: yahoo ? { clientId: mask(yahoo.clientId), hasRefresh: !!yahoo.refreshToken, source } : null,
-      gemini: gemini ? { apiKey: mask(gemini.apiKey), model: (gemini as any).model || 'gemini-2.5-pro' } : null,
+      gemini: gemini ? { apiKey: mask(gemini.apiKey), model: (gemini as any).model || 'gemini-2.5-flash' } : null,
     }};
     console.log('[/api/creds] Sending response:', responseData);
     res.json(responseData);
