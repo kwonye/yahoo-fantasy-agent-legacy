@@ -179,19 +179,6 @@ export class BotController {
       const cfgMgr0 = new ConfigManager();
       const app = cfgMgr0.loadAppSettings();
       
-      // Refresh roster balance cache at the start of daily run
-      try {
-        await this.ensureCanonicalKeys();
-        const league = await this.yahoo.getLeague(this.leagueKey);
-        this.setCanonicalKeys({ leagueKey: league?.id });
-        const myEntries = await this.yahoo.getTeamRosterWithSlots(this.teamKey);
-        const myRoster = myEntries.map((e) => e.player);
-        await this.getRosterBalance(myRoster, league.settings);
-        this.audit.recordAction('roster_balance_cache_refreshed');
-      } catch (e) {
-        this.audit.recordAction('roster_balance_cache_refresh_failed', { error: (e as Error).message });
-      }
-      
       await this.runRosterHygiene();
       // Game-day awareness: on Thu/Sun/Mon, rely on kickoff checks for lineup to save budget
       const dow = new Date().getDay(); // 0 Sun ... 6 Sat
@@ -629,6 +616,9 @@ export class BotController {
       const my = myEntries.map((e) => e.player);
       if (my.length === 0) { this.audit.recordAction('trades_skipped', { reason: 'empty_roster' }); return; }
 
+      // Refresh roster balance as part of daily trade planning
+      const balance = await this.getRosterBalance(my, league.settings);
+
       // Fetch all league teams and build opponent roster list
       let opponentTeams: Array<{ key: string; name?: string }> = [];
       try { opponentTeams = await this.yahoo.getLeagueTeams(this.leagueKey); } catch {}
@@ -656,6 +646,8 @@ export class BotController {
         season: league.season,
         leagueSettings: league.settings,
         leagueProfile,
+        rosterNeeds: balance.needs,
+        rosterSurplus: balance.surplus,
       } as any);
       this.audit.recordAction('trade_multi_eval_end', { shouldTrade: res.shouldTrade, expectedValue: res.expectedValue, confidence: res.confidence });
       if (!res.shouldTrade || !res.proposal) {
