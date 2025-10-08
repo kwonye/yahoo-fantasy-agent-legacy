@@ -1,12 +1,36 @@
+/**
+ * @fileoverview Utility functions for roster management, specifically for handling
+ * Injured Reserve (IR) and FLEX position assignments.
+ */
 import { LeagueSettings } from '../models/Team';
 import { Player } from '../models/Player';
 
+/**
+ * @interface RosterEntry
+ * @description Represents a player on a team's roster, including their assigned slot.
+ * @property {string} [slot] - The roster slot the player is currently in (e.g., 'QB', 'RB', 'IR').
+ * @property {Player} player - The player object.
+ */
 export interface RosterEntry { slot?: string; player: Player }
 
+/**
+ * @interface LineupAssignment
+ * @description Represents a planned move of a player to a specific roster position.
+ * @property {string} position - The target position for the player (e.g., 'IR', 'BN', 'FLEX').
+ * @property {string} playerId - The ID of the player to be moved.
+ */
 export interface LineupAssignment { position: string; playerId: string }
 
 const FLEX_SLOTS = new Set<string>(['FLEX', 'W/R/T', 'W/R', 'W/T']);
 
+/**
+ * @function computeIrAssignments
+ * @description Analyzes a team's roster to determine optimal moves to and from the Injured Reserve (IR) slot.
+ * It identifies players eligible to be moved to IR and players on IR who are no longer eligible and should be moved to the bench.
+ * @param {RosterEntry[]} entries - The current roster entries with slot assignments.
+ * @param {LeagueSettings} league - The settings for the league.
+ * @returns {LineupAssignment[]} An array of lineup assignments for IR moves.
+ */
 export function computeIrAssignments(entries: RosterEntry[], league: LeagueSettings): LineupAssignment[] {
   const out: LineupAssignment[] = [];
   const rosterPos = (league && league.rosterPositions) ? league.rosterPositions : {} as any;
@@ -42,6 +66,15 @@ export function computeIrAssignments(entries: RosterEntry[], league: LeagueSetti
   return out;
 }
 
+/**
+ * @function computeFlexAssignments
+ * @description Analyzes a team's starting lineup to determine the optimal player to place in the FLEX position.
+ * The heuristic aims to place the starter with the latest-starting game into the FLEX spot,
+ * which provides maximum flexibility for last-minute lineup changes.
+ * @param {RosterEntry[]} entries - The current roster entries with slot assignments.
+ * @param {LeagueSettings} league - The settings for the league.
+ * @returns {LineupAssignment[]} An array containing a single lineup assignment for the FLEX position, or an empty array if no change is needed.
+ */
 export function computeFlexAssignments(entries: RosterEntry[], league: LeagueSettings): LineupAssignment[] {
   const out: LineupAssignment[] = [];
   const rp = (league && league.rosterPositions) ? league.rosterPositions : {} as any;

@@ -1,18 +1,51 @@
-// Client-side dashboard logic (TypeScript)
+/**
+ * @fileoverview Client-side TypeScript for the Yahoo Fantasy Agent dashboard.
+ * This file handles all DOM manipulation, API calls from the browser, and event handling.
+ */
+
+/**
+ * @typedef {HTMLElement & { value?: string; checked?: boolean }} AnyEl
+ * @description A helper type for DOM elements that might have `value` or `checked` properties.
+ */
 type AnyEl = HTMLElement & { value?: string; checked?: boolean };
 
+/**
+ * @function $
+ * @description A shorthand for `document.getElementById`.
+ * @param {string} id The ID of the element to find.
+ * @returns {AnyEl | null} The found element, cast to `AnyEl`, or null.
+ */
 const $ = (id: string) => document.getElementById(id) as AnyEl | null;
 
+/**
+ * @async
+ * @function fetchJson
+ * @description A wrapper around `fetch` to simplify making GET requests and parsing the response as JSON.
+ * @template T The expected type of the JSON response.
+ * @param {string} url The URL to fetch.
+ * @returns {Promise<T>} The parsed JSON data.
+ */
 async function fetchJson<T = any>(url: string): Promise<T> {
   const r = await fetch(url);
   return r.json();
 }
 
+/**
+ * @function setJson
+ * @description Sets the text content of an element to a formatted JSON string.
+ * @param {string} id The ID of the element to update.
+ * @param {any} obj The object to stringify and display.
+ */
 function setJson(id: string, obj: any) {
   const el = $(id);
   if (el) el.textContent = JSON.stringify(obj, null, 2);
 }
 
+/**
+ * @function renderActivity
+ * @description Renders a list of activity events into the activity log table.
+ * @param {any[]} events An array of event objects to render.
+ */
 function renderActivity(events: any[]) {
   const tbody = $('activity'); if (!tbody) return;
   tbody.innerHTML = '';
@@ -27,6 +60,12 @@ function renderActivity(events: any[]) {
   }
 }
 
+/**
+ * @function setBadges
+ * @description Updates the status badges on the dashboard based on the current configuration and credentials.
+ * @param {any} cfg The application configuration object.
+ * @param {any} creds The credentials status object.
+ */
 function setBadges(cfg: any, creds: any) {
   const mode = $('modeBadge');
   if (mode) {
@@ -38,6 +77,11 @@ function setBadges(cfg: any, creds: any) {
   if (gb) { if (creds?.creds?.gemini) { gb.className='badge bg-success'; gb.textContent='Gemini: OK'; } else { gb.className='badge bg-warning text-dark'; gb.textContent='Gemini: Missing'; } }
 }
 
+/**
+ * @function setCredsSummary
+ * @description Updates the credentials summary section with the status of Yahoo and Gemini credentials.
+ * @param {any} creds The credentials status object.
+ */
 function setCredsSummary(creds: any) {
   const yb = $('credsYahooBadge'); const gb = $('credsGeminiBadge'); const details = $('credsDetails');
   const y = creds?.creds?.yahoo; const g = creds?.creds?.gemini;
@@ -46,6 +90,11 @@ function setCredsSummary(creds: any) {
   if (details) details.textContent = JSON.stringify({ yahoo: y||null, gemini: g||null }, null, 2);
 }
 
+/**
+ * @function setMetricsSummary
+ * @description Updates the metrics summary section with the latest bot performance metrics.
+ * @param {any} m The metrics object from the API.
+ */
 function setMetricsSummary(m: any) {
   const el = $('metrics'); if (!el) return;
   const meta = m?.metrics || {};
@@ -57,9 +106,28 @@ function setMetricsSummary(m: any) {
   ].join('\n');
 }
 
+/**
+ * @function lsGet
+ * @description A safe wrapper for `localStorage.getItem`.
+ * @param {string} key The key to retrieve.
+ * @param {string} [def=''] The default value if the key is not found.
+ * @returns {string} The retrieved value or the default.
+ */
 function lsGet(key: string, def = ''): string { try { const v = localStorage.getItem(key); return v===null? def : v; } catch { return def; } }
+
+/**
+ * @function lsSet
+ * @description A safe wrapper for `localStorage.setItem`.
+ * @param {string} key The key to set.
+ * @param {string} val The value to set.
+ */
 function lsSet(key: string, val: string) { try { localStorage.setItem(key, val); } catch {} }
 
+/**
+ * @async
+ * @function fillEnvPanel
+ * @description Fetches the current environment settings from the API and populates the settings form fields.
+ */
 async function fillEnvPanel() {
   const env = await fetchJson('/api/env');
   const leagueEl = $('leagueKeyInput'); const teamEl = $('teamKeyInput');
@@ -76,6 +144,11 @@ async function fillEnvPanel() {
   const sm = lsGet('scheduleMinute',''); if (sm && schedMinEl) schedMinEl.value = sm;
 }
 
+/**
+ * @async
+ * @function refreshGemini
+ * @description Fetches and renders the latest Gemini API interaction logs.
+ */
 async function refreshGemini() {
   const chat = $('geminiChat'); if (!chat) return;
   chat.innerHTML = '';
@@ -91,11 +164,19 @@ async function refreshGemini() {
   }
 }
 
+/**
+ * @function escapeHtml
+ * @description Escapes a string for safe insertion into HTML.
+ * @param {string} s The string to escape.
+ * @returns {string} The escaped string.
+ */
 function escapeHtml(s: string): string { return String(s).replace(/[&<>\"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]); }
 
-
-
-
+/**
+ * @async
+ * @function refreshRoster
+ * @description Fetches the team roster from the API and renders it in the UI.
+ */
 async function refreshRoster() {
   const leagueKey = (($('leagueKeyInput')||{}) as AnyEl).value || '';
   const teamKey = (($('teamKeyInput')||{}) as AnyEl).value || '';
@@ -141,6 +222,11 @@ async function refreshRoster() {
   } catch (e) { console.error('Failed to load roster', e); }
 }
 
+/**
+ * @async
+ * @function refreshAll
+ * @description A main refresh function that calls all other refresh functions to update the entire dashboard.
+ */
 async function refreshAll() {
   try {
     setJson('health', await fetchJson('/health'));
@@ -159,7 +245,10 @@ async function refreshAll() {
 }
 
 
-
+/**
+ * @function initHandlers
+ * @description Initializes all event handlers for the dashboard's interactive elements.
+ */
 function initHandlers() {
   
   
@@ -248,11 +337,21 @@ document.addEventListener('DOMContentLoaded', () => { initHandlers(); refreshAll
   } catch {}
 })();
 
-// ---------------- League Profile (Scoring & Settings) ----------------
+/**
+ * @async
+ * @function getLeagueKeyForConfig
+ * @description A helper function to get the currently configured league key from the backend.
+ * @returns {Promise<string>} The league key.
+ */
 async function getLeagueKeyForConfig(): Promise<string> {
   try { const env = await fetchJson('/api/env'); return env.leagueKey || ''; } catch { return ''; }
 }
 
+/**
+ * @async
+ * @function refreshLeagueProfile
+ * @description Fetches and displays the league profile configuration.
+ */
 async function refreshLeagueProfile() {
   const view = $('leagueProfileView');
   if (!view) return;
@@ -274,6 +373,12 @@ async function refreshLeagueProfile() {
   }
 }
 
+/**
+ * @function sampleLeagueProfile
+ * @description Generates a sample league profile object.
+ * @param {string} leagueKey The league key to include in the profile.
+ * @returns {object} A sample league profile.
+ */
 function sampleLeagueProfile(leagueKey: string) {
   const meta = { leagueId:'399238', leagueName:'DG', leagueLogo:'', customLeagueUrl:'https://football.fantasysports.yahoo.com/league/dg2', draftType:'Live Standard Draft', draftTime:'Wed Sep 3 5:45pm PDT', cashLeague:false, maxTeams:12, liveDraftPickTime:'1 Minute, 45 Seconds', scoringType:'Head-to-Head', startScoringWeek:1, cantCutListProvider:'Yahoo Sports', maxAcquisitionsSeason:null as any, maxAcquisitionsWeek:null as any, maxTradesSeason:null as any, tradeEndDate:'2025-11-22', allowDraftPickTrades:false, tradeReview:'Commissioner', tradeRejectTime:'2 days', waiverTime:'1 day', waiverType:'FAB w/ Reverse order of standings tiebreak', weeklyWaivers:'Game Time - Tuesday', allowInjuredAdds:true, postDraftPlayers:'Free Agents', playoffs:'4 teams - Week 16 and 17 (ends Monday, Dec 29)', playoffTieBreaker:'Best regular season record vs opponent wins', playoffReseeding:true, divisions:false, lockEliminatedTeams:true, applyInjuredStatusForPostponed:false, rosterPositions:['QB','WR','WR','WR','RB','RB','TE','W/R/T','W/R/T','K','DEF','BN','BN','BN','BN','BN','IR'], fractionalPoints:true, negativePoints:true, lockBenchedPlayers:false, publicViewable:false, invitePermissions:'All Managers Can Invite' };
   const offense = [ {name:'Passing Yards', value:'25 yards per point; 2 points at 350 yards; 1 points at 400 yards'}, {name:'Passing Touchdowns', value:6, yahooDefault:4}, {name:'Interceptions', value:-2, yahooDefault:-1}, {name:'Rushing Yards', value:'10 yards per point; 2 points at 100 yards; 1 points at 150 yards'}, {name:'Rushing Touchdowns', value:6}, {name:'Receptions', value:1, yahooDefault:0.5}, {name:'Receiving Yards', value:'10 yards per point; 2 points at 125 yards; 1 points at 175 yards'}, {name:'Receiving Touchdowns', value:6}, {name:'Return Yards', value:'20 yards per point; 1 points at 100 yards', yahooDefault:0}, {name:'Return Touchdowns', value:6}, {name:'2-Point Conversions', value:2}, {name:'Fumbles Lost', value:-2}, {name:'Offensive Fumble Return TD', value:6} ];
@@ -282,6 +387,11 @@ function sampleLeagueProfile(leagueKey: string) {
   return { leagueKey, meta, scoring: { offense, kickers, defense } };
 }
 
+/**
+ * @function lpEnterEdit
+ * @description Enters the league profile editing mode.
+ * @param {any} jsonObj The league profile object to edit.
+ */
 function lpEnterEdit(jsonObj: any){
   const view = $('leagueProfileView') as AnyEl | null; const edit = $('leagueProfileEdit') as AnyEl | null;
   if (!edit || !view) return;
@@ -291,6 +401,11 @@ function lpEnterEdit(jsonObj: any){
   const ca = $('lpCancelBtn') as AnyEl | null; if (ca) ca.style.display = 'inline-block';
 }
 
+/**
+ * @async
+ * @function lpSave
+ * @description Saves the edited league profile to the backend.
+ */
 async function lpSave(){
   const edit = $('leagueProfileEdit') as AnyEl | null;
   const leagueKey = await getLeagueKeyForConfig();

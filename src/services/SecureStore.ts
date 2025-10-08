@@ -1,16 +1,35 @@
+/**
+ * @fileoverview A class for securely storing and retrieving sensitive data
+ * by encrypting it and saving it to the local file system.
+ */
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
+/**
+ * @interface SecureStoreOptions
+ * @description Options for configuring the SecureStore.
+ * @property {string} baseDir - The base directory where encrypted files will be stored.
+ * @property {string} encryptionKey - The secret key used for encryption. Can be a raw string, hex, or base64.
+ */
 export interface SecureStoreOptions {
   baseDir: string;
   encryptionKey: string; // 32-byte key in hex or base64 or raw
 }
 
+/**
+ * @class SecureStore
+ * @description Provides methods to save, load, and remove data securely.
+ * Data is encrypted using AES-256-GCM before being written to a file.
+ */
 export class SecureStore {
   private readonly baseDir: string;
   private readonly key: Buffer;
 
+  /**
+   * @constructor
+   * @param {SecureStoreOptions} options - The configuration options for the secure store.
+   */
   constructor(options: SecureStoreOptions) {
     this.baseDir = options.baseDir;
     this.key = SecureStore.normalizeKey(options.encryptionKey);
@@ -19,6 +38,14 @@ export class SecureStore {
     }
   }
 
+  /**
+   * @static
+   * @method normalizeKey
+   * @description Normalizes a user-provided key string into a 32-byte buffer suitable for AES-256.
+   * It accepts hex, base64, or raw strings and uses SHA-256 to ensure the correct length.
+   * @param {string} input - The raw encryption key string.
+   * @returns {Buffer} A 32-byte buffer representing the encryption key.
+   */
   static normalizeKey(input: string): Buffer {
     // Accept hex, base64, or raw string; generate a 32-byte key via HKDF if needed
     let buf: Buffer;
@@ -40,10 +67,24 @@ export class SecureStore {
     return buf;
   }
 
+  /**
+   * @private
+   * @method filePath
+   * @description Generates the full file path for a given data name.
+   * @param {string} name - The name of the data item.
+   * @returns {string} The full path to the encrypted file.
+   */
   private filePath(name: string): string {
     return path.join(this.baseDir, `${name}.enc.json`);
   }
 
+  /**
+   * @method save
+   * @description Encrypts and saves data to a file.
+   * @template T - The type of the data being saved.
+   * @param {string} name - The name to store the data under.
+   * @param {T} data - The data to save.
+   */
   save<T>(name: string, data: T): void {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv);
@@ -59,6 +100,13 @@ export class SecureStore {
     fs.writeFileSync(this.filePath(name), JSON.stringify(payload, null, 2), { encoding: 'utf8' });
   }
 
+  /**
+   * @method load
+   * @description Loads and decrypts data from a file.
+   * @template T - The expected type of the loaded data.
+   * @param {string} name - The name of the data to load.
+   * @returns {T | null} The decrypted data, or null if the file does not exist.
+   */
   load<T>(name: string): T | null {
     const fp = this.filePath(name);
     if (!fs.existsSync(fp)) return null;
@@ -77,6 +125,11 @@ export class SecureStore {
     return JSON.parse(plaintext.toString('utf8')) as T;
   }
 
+  /**
+   * @method remove
+   * @description Deletes a securely stored file.
+   * @param {string} name - The name of the data to remove.
+   */
   remove(name: string): void {
     const fp = this.filePath(name);
     try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch {}

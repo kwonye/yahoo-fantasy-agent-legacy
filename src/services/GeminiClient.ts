@@ -1,3 +1,6 @@
+/**
+ * @fileoverview A client for interacting with the Google Gemini API for fantasy football analysis.
+ */
 import { ConfigManager } from './ConfigManager';
 import { GeminiQuota } from './GeminiQuota';
 import { AnalysisContext, BotConfig, LeagueSettings, LineupDecision } from '../models';
@@ -6,18 +9,35 @@ import { TradeDecision, WaiverDecision } from '../models/Decision';
 import { GeminiLog } from './GeminiLog';
 import { GoogleGenAI } from '@google/genai';
 
+/**
+ * @interface GeminiClientOptions
+ * @description Options for configuring the GeminiClient.
+ * @property {string} [apiKey] - The Google Gemini API key.
+ * @property {string} [model] - The specific Gemini model to use (e.g., 'gemini-1.5-flash').
+ * @property {string} [baseUrl] - The base URL for the Gemini API.
+ */
 export interface GeminiClientOptions {
   apiKey?: string;
   model?: string; // e.g., gemini-2.5-flash
   baseUrl?: string; // e.g., https://generativelanguage.googleapis.com/v1beta
 }
 
+/**
+ * @class GeminiClient
+ * @description Provides methods for making specific fantasy football-related queries to the Gemini API.
+ * It handles prompt construction, API interaction, response parsing, and quota management.
+ */
 export class GeminiClient {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly quota: GeminiQuota;
   private readonly genAI: GoogleGenAI;
 
+  /**
+   * @constructor
+   * @param {GeminiClientOptions} [opts={}] - Configuration options for the client.
+   * @throws {Error} If the API key is not provided.
+   */
   constructor(opts: GeminiClientOptions = {}) {
     // Prefer explicit option, then env, then secure store via ConfigManager
     let key = opts.apiKey ?? '';
@@ -42,7 +62,15 @@ export class GeminiClient {
     });
   }
 
-  // --------- Public high-level helpers ---------
+  /**
+   * @method optimizeLineup
+   * @description Asks the AI to determine the optimal lineup from a given roster.
+   * @param {Player[]} roster - The list of players on the team.
+   * @param {LeagueSettings} leagueSettings - The league's settings.
+   * @param {BotConfig} config - The bot's configuration.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {Promise<LineupDecision>} The AI's recommended lineup decision.
+   */
   async optimizeLineup(
     roster: Player[],
     leagueSettings: LeagueSettings,
@@ -62,6 +90,15 @@ export class GeminiClient {
     return this.parseJson<LineupDecision>(text, 'LineupDecision');
   }
 
+  /**
+   * @method evaluateWaiver
+   * @description Asks the AI to evaluate available waiver wire players and recommend claims.
+   * @param {Player[]} availablePlayers - Players available on the waiver wire.
+   * @param {BotConfig} config - The bot's configuration.
+   * @param {number} maxClaims - The maximum number of claims to make.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {Promise<WaiverDecision>} The AI's recommended waiver decision.
+   */
   async evaluateWaiver(
     availablePlayers: Player[],
     config: BotConfig,
@@ -81,7 +118,15 @@ export class GeminiClient {
     return this.parseJson<WaiverDecision>(text, 'WaiverDecision');
   }
 
-  // Immediate pickups (free agents now): require explicit dropPlayerId for each add
+  /**
+   * @method evaluateImmediatePickups
+   * @description Asks the AI to evaluate immediate free agent pickups, requiring a player to be dropped for each addition.
+   * @param {Player[]} availablePlayers - Players available for immediate pickup.
+   * @param {Player[]} myRoster - The current team roster.
+   * @param {number} maxAdds - The maximum number of players to add.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {Promise<WaiverDecision>} The AI's recommended pickup decision.
+   */
   async evaluateImmediatePickups(
     availablePlayers: Player[],
     myRoster: Player[],
@@ -101,7 +146,14 @@ export class GeminiClient {
     return this.parseJson<WaiverDecision>(text, 'ImmediatePickups');
   }
 
-  // Propose a single drop candidate from my roster for a given add
+  /**
+   * @method suggestDropForAdd
+   * @description Asks the AI to suggest a single player to drop from a roster to make room for a new player.
+   * @param {string} addPlayerId - The ID of the player to be added.
+   * @param {Player[]} myRoster - The current team roster.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {Promise<{ dropPlayerId: string; reasoning: string }>} The AI's suggestion for which player to drop.
+   */
   async suggestDropForAdd(
     addPlayerId: string,
     myRoster: Player[],
@@ -142,6 +194,15 @@ export class GeminiClient {
     return this.parseJson<{ dropPlayerId: string; reasoning: string }>(text, 'SuggestDrop');
   }
 
+  /**
+   * @method evaluateTrade
+   * @description Asks the AI to evaluate a trade between two teams.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {Player[]} theirRoster - The opposing team's roster.
+   * @param {BotConfig} config - The bot's configuration.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {Promise<TradeDecision>} The AI's evaluation of the trade.
+   */
   async evaluateTrade(
     myRoster: Player[],
     theirRoster: Player[],
@@ -159,6 +220,15 @@ export class GeminiClient {
     return this.parseJson<TradeDecision>(text, 'TradeDecision');
   }
 
+  /**
+   * @method evaluateTradesMulti
+   * @description Asks the AI to evaluate potential trades with multiple opponents.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {Array<{ teamKey: string; teamName?: string; roster: Player[] }>} opponents - A list of opponent teams.
+   * @param {BotConfig} config - The bot's configuration.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {Promise<TradeDecision>} The AI's trade evaluation, potentially including multiple proposals.
+   */
   async evaluateTradesMulti(
     myRoster: Player[],
     opponents: Array<{ teamKey: string; teamName?: string; roster: Player[] }>,
@@ -176,7 +246,14 @@ export class GeminiClient {
     return this.parseJson<TradeDecision>(text, 'TradeDecisionMulti');
   }
 
-  // --------- Previews (for diagnostics) ---------
+  /**
+   * @method previewLineup
+   * @description Generates a preview of the system and user prompts for a lineup optimization call, without executing it.
+   * @param {Player[]} roster - The team roster.
+   * @param {LeagueSettings} leagueSettings - The league settings.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {{ system: string; user: string }} The generated system and user prompts.
+   */
   static previewLineup(
     roster: Player[],
     leagueSettings: LeagueSettings,
@@ -231,6 +308,14 @@ export class GeminiClient {
     return { system, user };
   }
 
+  /**
+   * @method previewWaivers
+   * @description Generates a preview of the prompts for a waiver evaluation call.
+   * @param {Player[]} players - The available players.
+   * @param {number} maxClaims - The maximum number of claims.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {{ system: string; user: string }} The generated system and user prompts.
+   */
   static previewWaivers(
     players: Player[],
     maxClaims: number,
@@ -258,6 +343,14 @@ export class GeminiClient {
     return { system, user };
   }
 
+  /**
+   * @method previewTrade
+   * @description Generates a preview of the prompts for a trade evaluation call.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {Player[]} theirRoster - The opposing team's roster.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {{ system: string; user: string }} The generated system and user prompts.
+   */
   static previewTrade(
     myRoster: Player[],
     theirRoster: Player[],
@@ -294,7 +387,13 @@ export class GeminiClient {
     return { system, user };
   }
 
-  // --------- Roster balance (needs/surplus) ---------
+  /**
+   * @method analyzeRosterBalance
+   * @description Asks the AI to analyze a roster to determine positional needs and surpluses.
+   * @param {Player[]} roster - The team roster to analyze.
+   * @param {LeagueSettings} leagueSettings - The league's settings.
+   * @returns {Promise<{ needs: string[]; surplus: string[]; reasoning: string }>} An object containing the needs, surplus, and reasoning.
+   */
   async analyzeRosterBalance(
     roster: Player[],
     leagueSettings: LeagueSettings,
@@ -332,6 +431,18 @@ export class GeminiClient {
     return this.parseJson<{ needs: string[]; surplus: string[]; reasoning: string }>(text, 'RosterBalance');
   }
 
+  /**
+   * @method evaluateIncomingTradeOffer
+   * @description Asks the AI to evaluate an incoming trade offer and decide whether to accept or decline.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {LeagueSettings} leagueSettings - The league settings.
+   * @param {string[]} needs - The team's positional needs.
+   * @param {string[]} surplus - The team's positional surpluses.
+   * @param {Array<any>} moves - The players involved in the trade.
+   * @param {string} myTeamKey - The key of the bot's team.
+   * @param {any} [leagueProfile] - The detailed league profile.
+   * @returns {Promise<{ shouldAccept: boolean; reasoning: string; confidence: number }>} The AI's decision on the trade offer.
+   */
   async evaluateIncomingTradeOffer(
     myRoster: Player[],
     leagueSettings: LeagueSettings,
@@ -412,6 +523,15 @@ export class GeminiClient {
 
     return { shouldAccept, reasoning, confidence };
   }
+
+  /**
+   * @method previewLineupPrompt
+   * @description A convenience method to get the prompts for a lineup optimization call without executing it.
+   * @param {Player[]} roster - The team roster.
+   * @param {LeagueSettings} leagueSettings - The league settings.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {{ system: string; user: string }} The generated system and user prompts.
+   */
   previewLineupPrompt(
     roster: Player[],
     leagueSettings: LeagueSettings,
@@ -420,7 +540,15 @@ export class GeminiClient {
     return GeminiClient.previewLineup(roster, leagueSettings, context);
   }
 
-  // --------- Core API call ---------
+  /**
+   * @method generate
+   * @description The core method for making a request to the Gemini API.
+   * @param {string} system - The system prompt/instruction.
+   * @param {string} user - The user prompt/data.
+   * @param {any} [inputs] - Optional metadata about the inputs for logging purposes.
+   * @returns {Promise<string>} The raw text response from the API.
+   * @throws {Error} If the daily quota is exceeded or the API returns an error.
+   */
   async generate(system: string, user: string, inputs?: any): Promise<string> {
     if (!this.quota.tryConsume(1)) {
       const err = new Error(`Gemini daily quota exceeded (limit=${this.quota.getLimit()})`);
@@ -466,7 +594,15 @@ export class GeminiClient {
     }
   }
 
-  // --------- Prompt builders ---------
+  /**
+   * @private
+   * @method buildLineupPrompt
+   * @description Constructs the user prompt for a lineup optimization request.
+   * @param {Player[]} roster - The team roster.
+   * @param {LeagueSettings} leagueSettings - The league settings.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {string} The constructed user prompt.
+   */
   private buildLineupPrompt(
     roster: Player[],
     leagueSettings: LeagueSettings,
@@ -525,6 +661,15 @@ export class GeminiClient {
     ].filter(Boolean).join('\n');
   }
 
+  /**
+   * @private
+   * @method buildWaiverPrompt
+   * @description Constructs the user prompt for a waiver evaluation request.
+   * @param {Player[]} players - The available players.
+   * @param {number} maxClaims - The maximum number of claims.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {string} The constructed user prompt.
+   */
   private buildWaiverPrompt(
     players: Player[],
     maxClaims: number,
@@ -577,6 +722,16 @@ export class GeminiClient {
     ].join('\n');
   }
 
+  /**
+   * @private
+   * @method buildImmediatePickupPrompt
+   * @description Constructs the user prompt for an immediate pickup request.
+   * @param {Player[]} availablePlayers - The available players.
+   * @param {Player[]} myRoster - The current team roster.
+   * @param {number} maxAdds - The maximum number of additions.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {string} The constructed user prompt.
+   */
   private buildImmediatePickupPrompt(
     availablePlayers: Player[],
     myRoster: Player[],
@@ -618,6 +773,15 @@ export class GeminiClient {
     ].join('\n');
   }
 
+  /**
+   * @private
+   * @method buildTradePrompt
+   * @description Constructs the user prompt for a trade evaluation request.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {Player[]} theirRoster - The opposing team's roster.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {string} The constructed user prompt.
+   */
   private buildTradePrompt(
     myRoster: Player[],
     theirRoster: Player[],
@@ -661,6 +825,15 @@ export class GeminiClient {
     ].join('\n');
   }
 
+  /**
+   * @private
+   * @method buildTradeMultiPrompt
+   * @description Constructs the user prompt for a multi-team trade evaluation request.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {Array<{ teamKey: string; teamName?: string; roster: Player[] }>} opponents - The list of opponent teams.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional analysis context.
+   * @returns {string} The constructed user prompt.
+   */
   private buildTradeMultiPrompt(
     myRoster: Player[],
     opponents: Array<{ teamKey: string; teamName?: string; roster: Player[] }>,
@@ -708,7 +881,16 @@ export class GeminiClient {
     ].join('\n');
   }
 
-  // --------- Parsing helpers ---------
+  /**
+   * @private
+   * @method parseJson
+   * @description Parses a JSON string, attempting to extract it from markdown code fences if necessary.
+   * @template T - The expected type of the parsed object.
+   * @param {string} text - The raw text response from the API.
+   * @param {string} label - A label for the object being parsed, for error messages.
+   * @returns {T} The parsed object.
+   * @throws {Error} If parsing fails.
+   */
   private parseJson<T>(text: string, label: string): T {
     // Try direct parse, else extract from fenced code blocks
     const tryParse = (s: string) => {
@@ -732,6 +914,13 @@ export class GeminiClient {
     }
   }
 
+  /**
+   * @private
+   * @method extractText
+   * @description Extracts the text content from a Gemini API response chunk.
+   * @param {any} chunk - The response chunk.
+   * @returns {string} The extracted text.
+   */
   private extractText(chunk: any): string {
     if (!chunk) return '';
     if (typeof chunk.text === 'string') return chunk.text;
@@ -747,11 +936,26 @@ export class GeminiClient {
     return '';
   }
 
+  /**
+   * @private
+   * @method shouldUseSearch
+   * @description Determines if the Google Search tool should be used for a given request type.
+   * @param {string} [_kind] - The kind of request.
+   * @returns {boolean} True if search should be used.
+   */
   private shouldUseSearch(_kind?: string): boolean {
     return true;
   }
 }
 
+/**
+ * @private
+ * @function coerceDecision
+ * @description Coerces various forms of AI responses (boolean, string, number) into a definitive boolean decision.
+ * It checks a list of candidate values and uses pattern matching for strings.
+ * @param {Array<unknown>} candidates - A list of potential decision values from the AI response.
+ * @returns {boolean} The coerced boolean decision. Defaults to `false` (decline).
+ */
 function coerceDecision(...candidates: Array<unknown>): boolean {
   for (const value of candidates) {
     if (typeof value === 'boolean') return value;
@@ -785,6 +989,13 @@ function coerceDecision(...candidates: Array<unknown>): boolean {
   return false; // Default to decline if decision cannot be determined
 }
 
+/**
+ * @private
+ * @function coerceConfidence
+ * @description Coerces various forms of AI responses into a normalized confidence score between 0 and 1.
+ * @param {Array<unknown>} candidates - A list of potential confidence values from the AI response.
+ * @returns {number} The normalized confidence score. Defaults to 0.
+ */
 function coerceConfidence(...candidates: Array<unknown>): number {
   for (const value of candidates) {
     let parsed: number | null = null;

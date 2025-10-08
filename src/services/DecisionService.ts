@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Service for making high-level decisions by orchestrating the GeminiClient
+ * and applying business logic and validation to its outputs.
+ */
 import { BotConfig } from '../models/Config';
 import { LeagueSettings } from '../models/Team';
 import { LineupDecision } from '../models/Lineup';
@@ -6,20 +10,43 @@ import { TradeDecision, TradeProposal, WaiverDecision } from '../models/Decision
 import { AnalysisContext } from '../models/Config';
 import { GeminiClient } from './GeminiClient';
 
+/**
+ * @interface DecisionServiceOptions
+ * @description Options for configuring the DecisionService.
+ * @property {number} [minConfidence] - The minimum confidence level (0-1) to accept AI decisions.
+ */
 export interface DecisionServiceOptions {
   minConfidence?: number; // general minimum confidence to accept Gemini decisions
 }
 
+/**
+ * @class DecisionService
+ * @description This service acts as a layer on top of the `GeminiClient` to make fantasy football decisions.
+ * It calls the AI for analysis and then validates, sanitizes, and enriches the results before returning them.
+ */
 export class DecisionService {
   private readonly gemini: GeminiClient;
   private readonly minConfidence: number;
 
+  /**
+   * @constructor
+   * @param {GeminiClient} gemini - An instance of the GeminiClient.
+   * @param {DecisionServiceOptions} [opts={}] - Configuration options.
+   */
   constructor(gemini: GeminiClient, opts: DecisionServiceOptions = {}) {
     this.gemini = gemini;
     
     this.minConfidence = opts.minConfidence ?? 0.5;
   }
 
+  /**
+   * @method decideLineup
+   * @description Determines the optimal lineup for a given roster and league settings.
+   * @param {Player[]} roster - The current team roster.
+   * @param {LeagueSettings} leagueSettings - The settings of the league.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional context for the decision.
+   * @returns {Promise<LineupDecision>} A validated and structured lineup decision.
+   */
   async decideLineup(
     roster: Player[],
     leagueSettings: LeagueSettings,
@@ -39,6 +66,13 @@ export class DecisionService {
     return validated;
   }
 
+  /**
+   * @method decideWaivers
+   * @description Evaluates available players on the waiver wire and decides which claims to make.
+   * @param {Player[]} availablePlayers - A list of players available on the waiver wire.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional context for the decision.
+   * @returns {Promise<WaiverDecision>} A validated and structured waiver decision.
+   */
   async decideWaivers(
     availablePlayers: Player[],
     context: Omit<AnalysisContext, 'userPreferences'>
@@ -100,6 +134,14 @@ export class DecisionService {
     return { claims, reasoning, confidence, expectedValue };
   }
 
+  /**
+   * @method decideTrade
+   * @description Evaluates a potential trade with another team.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {Player[]} theirRoster - The opposing team's roster.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional context for the decision.
+   * @returns {Promise<TradeDecision>} A validated and structured trade decision.
+   */
   async decideTrade(
     myRoster: Player[],
     theirRoster: Player[],
@@ -135,6 +177,14 @@ export class DecisionService {
     };
   }
 
+  /**
+   * @method decideTradeMulti
+   * @description Evaluates potential trades with multiple opponents simultaneously.
+   * @param {Player[]} myRoster - The bot's team roster.
+   * @param {Array<{ teamKey: string; teamName?: string; roster: Player[] }>} opponents - A list of opponent teams and their rosters.
+   * @param {Omit<AnalysisContext, 'userPreferences'>} context - Additional context for the decision.
+   * @returns {Promise<TradeDecision>} A validated and structured trade decision, potentially including multiple proposals.
+   */
   async decideTradeMulti(
     myRoster: Player[],
     opponents: Array<{ teamKey: string; teamName?: string; roster: Player[] }>,
@@ -159,26 +209,62 @@ export class DecisionService {
   }
 }
 
+/**
+ * @private
+ * @function clamp
+ * @description Clamps a number between a minimum and maximum value.
+ * @param {number} n - The number to clamp.
+ * @param {number} min - The minimum value.
+ * @param {number} max - The maximum value.
+ * @returns {number} The clamped number.
+ */
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
+/**
+ * @private
+ * @function toNumber
+ * @description Safely converts a value to a number.
+ * @param {any} v - The value to convert.
+ * @param {number} def - The default value to return if conversion fails.
+ * @returns {number} The converted number or the default.
+ */
 function toNumber(v: any, def: number): number {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : def;
 }
 
+/**
+ * @private
+ * @interface TradeOpponentContext
+ * @description Internal interface for holding opponent data during trade normalization.
+ */
 interface TradeOpponentContext {
   teamKey: string;
   teamName?: string;
   roster: Player[];
 }
 
+/**
+ * @private
+ * @interface NormalizedTradeOutput
+ * @description Internal interface for the output of trade normalization.
+ */
 interface NormalizedTradeOutput {
   primary?: TradeProposal;
   all?: TradeProposal[];
 }
 
+/**
+ * @private
+ * @function normalizeTradeDecisionOutput
+ * @description Normalizes the raw output from the AI for a trade decision into a structured format.
+ * @param {any} raw - The raw AI output.
+ * @param {Player[]} myRoster - The bot's team roster.
+ * @param {TradeOpponentContext[]} opponents - The opponent teams.
+ * @returns {NormalizedTradeOutput} The normalized trade proposals.
+ */
 function normalizeTradeDecisionOutput(
   raw: any,
   myRoster: Player[],
@@ -214,6 +300,15 @@ function normalizeTradeDecisionOutput(
   return { primary: proposals[0], all: proposals };
 }
 
+/**
+ * @private
+ * @function normalizeTradeProposal
+ * @description Normalizes a single raw trade proposal from the AI.
+ * @param {any} candidate - The raw proposal candidate.
+ * @param {(token: string) => string | null} myResolver - A function to resolve player IDs for the bot's team.
+ * @param {TradeOpponentContext[]} opponents - The opponent teams.
+ * @returns {TradeProposal | null} The normalized trade proposal or null if invalid.
+ */
 function normalizeTradeProposal(
   candidate: any,
   myResolver: (token: string) => string | null,
@@ -255,6 +350,14 @@ function normalizeTradeProposal(
   };
 }
 
+/**
+ * @private
+ * @function normalizeTargetTeamId
+ * @description Resolves a raw target team identifier to a canonical team key.
+ * @param {any} raw - The raw team identifier.
+ * @param {TradeOpponentContext[]} opponents - The list of opponents.
+ * @returns {string | null} The canonical team key or null.
+ */
 function normalizeTargetTeamId(raw: any, opponents: TradeOpponentContext[]): string | null {
   const input = String(raw ?? '').trim();
   if (!input) return opponents.length === 1 ? opponents[0]?.teamKey ?? null : null;
@@ -276,6 +379,13 @@ function normalizeTargetTeamId(raw: any, opponents: TradeOpponentContext[]): str
   return null;
 }
 
+/**
+ * @private
+ * @function buildPlayerResolver
+ * @description Creates a function that can resolve a player's ID from various string tokens (name, ID, etc.).
+ * @param {Player[]} players - The list of players to build the resolver for.
+ * @returns {(token: string) => string | null} A resolver function.
+ */
 function buildPlayerResolver(players: Player[]): (token: string) => string | null {
   const byToken = new Map<string, string>();
   const addToken = (token: string | null | undefined, id: string) => {
@@ -339,6 +449,14 @@ function buildPlayerResolver(players: Player[]): (token: string) => string | nul
   };
 }
 
+/**
+ * @private
+ * @function teamKeysEquivalent
+ * @description Compares two team keys for equivalence, accounting for different formats.
+ * @param {string} a - The first team key.
+ * @param {string} b - The second team key.
+ * @returns {boolean} True if the keys are equivalent.
+ */
 function teamKeysEquivalent(a: string, b: string): boolean {
   const sa = String(a ?? '').trim();
   const sb = String(b ?? '').trim();
@@ -349,6 +467,13 @@ function teamKeysEquivalent(a: string, b: string): boolean {
   return !!idA && idA === idB;
 }
 
+/**
+ * @private
+ * @function extractTeamId
+ * @description Extracts the numeric team ID from a team key string.
+ * @param {string} key - The team key.
+ * @returns {string | null} The numeric team ID or null.
+ */
 function extractTeamId(key: string): string | null {
   const match = key.match(/\.t\.(\d+)/i);
   if (match && match[1]) return match[1];
@@ -360,6 +485,13 @@ function extractTeamId(key: string): string | null {
   return null;
 }
 
+/**
+ * @private
+ * @function extractDigits
+ * @description Extracts all digits from a string.
+ * @param {string} value - The input string.
+ * @returns {string} A string containing only the digits from the input.
+ */
 function extractDigits(value: string): string {
   const digits = value.replace(/\D+/g, '');
   return digits;

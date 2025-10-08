@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Manages application configuration, including loading from environment variables,
+ * JSON files, and a secure, encrypted store for credentials.
+ */
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
@@ -5,18 +9,35 @@ import { ApiCredentials, YahooCredentials, GeminiCredentials, RiskLevel, AuthTok
 import { SecureStore } from './SecureStore';
 import { KvSecureStore } from './KvSecureStore';
 
+/**
+ * @interface ConfigManagerOptions
+ * @description Options for initializing the ConfigManager.
+ * @property {string} [configDir] - Directory to store encrypted credentials.
+ * @property {string} [encryptionKey] - Encryption key, overrides environment variable.
+ */
 export interface ConfigManagerOptions {
   configDir?: string; // where to store encrypted credentials
   encryptionKey?: string; // overrides env var
   
 }
 
+/**
+ * @private
+ * @typedef {object} ConfigStore
+ * @description An internal type defining the interface for a secure storage mechanism.
+ */
 type ConfigStore = {
   save<T>(name: string, data: T): void;
   load<T>(name: string): T | null;
   remove(name: string): void;
 };
 
+/**
+ * @class ConfigManager
+ * @description Handles loading and saving of all application configuration, including API credentials,
+ * application settings, and league-specific profiles. It supports both local file system and KV store
+ * for secure credential storage.
+ */
 export class ConfigManager {
   private configDir: string;
   private readonly store: ConfigStore | null;
@@ -25,6 +46,10 @@ export class ConfigManager {
   private readonly leaguesDir: string;
   private readonly appSettingsPath: string;
 
+  /**
+   * @constructor
+   * @param {ConfigManagerOptions} [options={}] - Configuration options for the manager.
+   */
   constructor(options: ConfigManagerOptions = {}) {
     dotenv.config();
     const preferredDir = options.configDir ?? process.env.CONFIG_DIR ?? path.join(process.cwd(), '.secure');
@@ -56,9 +81,11 @@ export class ConfigManager {
     this.appSettingsPath = path.join(process.cwd(), 'config', 'app-settings.json');
   }
 
-  // --------- Public API ---------
-  
-
+  /**
+   * @method getEnvCredentials
+   * @description Loads API credentials directly from environment variables. This is non-persistent.
+   * @returns {ApiCredentials} The loaded API credentials.
+   */
   getEnvCredentials(): ApiCredentials {
     // Non-persistent, direct from env (Yahoo only; Gemini is saved via dashboard)
     const yahoo: YahooCredentials = {
@@ -73,6 +100,11 @@ export class ConfigManager {
     return { yahoo, gemini };
   }
 
+  /**
+   * @method getYahooEnvCredentials
+   * @description Loads Yahoo-specific credentials from environment variables.
+   * @returns {YahooCredentials} The loaded Yahoo credentials.
+   */
   getYahooEnvCredentials(): YahooCredentials {
     return {
       clientId: this.required(process.env.YAHOO_CLIENT_ID, 'YAHOO_CLIENT_ID'),
@@ -82,32 +114,61 @@ export class ConfigManager {
     };
   }
 
-  // Encrypted persistent credentials
+  /**
+   * @method saveYahooCredentials
+   * @description Saves Yahoo credentials to the secure store.
+   * @param {YahooCredentials} creds - The credentials to save.
+   */
   saveYahooCredentials(creds: YahooCredentials): void {
     this.ensureStore();
     this.store!.save<YahooCredentials>('yahoo', creds);
   }
 
+  /**
+   * @method loadYahooCredentials
+   * @description Loads Yahoo credentials from the secure store.
+   * @returns {YahooCredentials | null} The loaded credentials, or null if not found.
+   */
   loadYahooCredentials(): YahooCredentials | null {
     this.ensureStore();
     return this.store!.load<YahooCredentials>('yahoo');
   }
 
+  /**
+   * @method saveGeminiCredentials
+   * @description Saves Gemini AI credentials to the secure store.
+   * @param {GeminiCredentials} creds - The credentials to save.
+   */
   saveGeminiCredentials(creds: GeminiCredentials): void {
     this.ensureStore();
     this.store!.save<GeminiCredentials>('gemini', creds);
   }
 
+  /**
+   * @method loadGeminiCredentials
+   * @description Loads Gemini AI credentials from the secure store.
+   * @returns {GeminiCredentials | null} The loaded credentials, or null if not found.
+   */
   loadGeminiCredentials(): GeminiCredentials | null {
     this.ensureStore();
     return this.store!.load<GeminiCredentials>('gemini');
   }
 
+  /**
+   * @method saveYahooAuthToken
+   * @description Saves a Yahoo OAuth token to the secure store.
+   * @param {AuthToken} token - The token to save.
+   */
   saveYahooAuthToken(token: AuthToken): void {
     this.ensureStore();
     this.store!.save<AuthToken>('yahoo-token', token);
   }
 
+  /**
+   * @method loadYahooAuthToken
+   * @description Loads a Yahoo OAuth token from the secure store.
+   * @returns {AuthToken | null} The loaded token, or null if not found.
+   */
   loadYahooAuthToken(): AuthToken | null {
     this.ensureStore();
     const tok = this.store!.load<AuthToken>('yahoo-token');
@@ -118,17 +179,20 @@ export class ConfigManager {
     return tok;
   }
 
+  /**
+   * @method deleteYahooAuthToken
+   * @description Deletes the Yahoo OAuth token from the secure store.
+   */
   deleteYahooAuthToken(): void {
     this.ensureStore();
     try { this.store!.remove('yahoo-token'); } catch {}
   }
-
-  // --------- Helpers ---------
   
-
-  
-
-  // --------- App settings (UI-managed global state) ---------
+  /**
+   * @method loadAppSettings
+   * @description Loads the global application settings from a JSON file. If the file doesn't exist, it creates one with default values.
+   * @returns {AppSettings} The loaded application settings.
+   */
   loadAppSettings(): AppSettings {
     try {
       if (fs.existsSync(this.appSettingsPath)) {
@@ -158,6 +222,12 @@ export class ConfigManager {
     return seeded;
   }
 
+  /**
+   * @method saveAppSettings
+   * @description Saves the global application settings to a JSON file.
+   * @param {AppSettings} settings - The settings to save.
+   * @returns {AppSettings} The validated and saved settings.
+   */
   saveAppSettings(settings: AppSettings): AppSettings {
     const validated = this.applyAppDefaults(settings);
     const dir = path.dirname(this.appSettingsPath);
@@ -166,6 +236,13 @@ export class ConfigManager {
     return validated;
   }
 
+  /**
+   * @private
+   * @method applyAppDefaults
+   * @description Applies default values to a partial AppSettings object to ensure a complete and valid configuration.
+   * @param {Partial<AppSettings>} p - The partial settings object.
+   * @returns {AppSettings} The complete settings object with defaults applied.
+   */
   private applyAppDefaults(p: Partial<AppSettings>): AppSettings {
     const coerce = (n: any, def: number) => Number.isFinite(Number(n)) ? Number(n) : def;
     const base: AppSettings = {
@@ -191,7 +268,12 @@ export class ConfigManager {
     return base;
   }
 
-  // --------- League profile (per-league scoring & settings) ---------
+  /**
+   * @method loadLeagueProfile
+   * @description Loads a league profile from a JSON file. It searches in several standard locations for the file.
+   * @param {string} [_leagueKey] - The key of the league to load (currently unused, loads a single profile).
+   * @returns {LeagueProfile | null} The loaded league profile, or null if not found.
+   */
   loadLeagueProfile(_leagueKey?: string): LeagueProfile | null {
     try {
       // Try multiple candidate paths to be robust across cwd and dist/src layouts
@@ -274,6 +356,12 @@ export class ConfigManager {
     }
   }
 
+  /**
+   * @method saveLeagueProfile
+   * @description Saves a league profile to a standard JSON file location.
+   * @param {LeagueProfile} profile - The league profile to save.
+   * @returns {LeagueProfile} The saved league profile.
+   */
   saveLeagueProfile(profile: LeagueProfile): LeagueProfile {
     const dir = path.join(process.cwd(), 'config');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -282,10 +370,22 @@ export class ConfigManager {
     return profile;
   }
 
+  /**
+   * @private
+   * @method sanitizeKey
+   * @description Sanitizes a string to be used as a file or key name.
+   * @param {string} k - The string to sanitize.
+   * @returns {string} The sanitized string.
+   */
   private sanitizeKey(k: string): string {
     return String(k).replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
+  /**
+   * @private
+   * @method ensureStore
+   * @description Ensures that a secure store is configured and available, throwing an error if not.
+   */
   private ensureStore() {
     if (!this.store) {
       throw new Error('SecureStore not configured. Set CONFIG_ENCRYPTION_KEY or pass encryptionKey.');
@@ -295,6 +395,14 @@ export class ConfigManager {
     }
   }
 
+  /**
+   * @private
+   * @method tryCreateLocalStore
+   * @description Attempts to create a local file-based secure store.
+   * @param {string} dir - The base directory for the store.
+   * @param {string} encryptionKey - The encryption key.
+   * @returns {{ store: SecureStore; dir: string } | null} The store instance or null on failure.
+   */
   private tryCreateLocalStore(dir: string, encryptionKey: string): { store: SecureStore; dir: string } | null {
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -311,6 +419,13 @@ export class ConfigManager {
     }
   }
 
+  /**
+   * @private
+   * @method tryCreateKvStore
+   * @description Attempts to create a KV-based secure store using environment variables.
+   * @param {string} encryptionKey - The encryption key.
+   * @returns {ConfigStore | null} The store instance or null on failure.
+   */
   private tryCreateKvStore(encryptionKey: string): ConfigStore | null {
     const baseUrl = process.env.KV_REST_API_URL;
     const token = process.env.KV_REST_API_TOKEN;
@@ -324,6 +439,13 @@ export class ConfigManager {
     }
   }
 
+  /**
+   * @private
+   * @method parseRisk
+   * @description Parses a string into a RiskLevel enum.
+   * @param {string} [val] - The string to parse.
+   * @returns {RiskLevel | undefined} The parsed risk level or undefined.
+   */
   private parseRisk(val?: string): RiskLevel | undefined {
     if (!val) return undefined;
     const up = val.toUpperCase();
@@ -331,29 +453,56 @@ export class ConfigManager {
     return undefined;
   }
 
-  // position priorities are no longer configurable; Gemini infers them per context
-
+  /**
+   * @private
+   * @method parseBool
+   * @description Parses a string into a boolean.
+   * @param {string} [val] - The string to parse.
+   * @param {boolean} def - The default value if parsing fails.
+   * @returns {boolean | undefined} The parsed boolean or the default.
+   */
   private parseBool(val: string | undefined, def: boolean): boolean | undefined {
     if (val === undefined) return def;
     return /^true$/i.test(val) ? true : /^false$/i.test(val) ? false : def;
   }
 
+  /**
+   * @private
+   * @method parseInt
+   * @description Parses a string into an integer.
+   * @param {string} [val] - The string to parse.
+   * @param {number} def - The default value if parsing fails.
+   * @returns {number | undefined} The parsed integer or the default.
+   */
   private parseInt(val: string | undefined, def: number): number | undefined {
     if (val === undefined) return def;
     const n = Number.parseInt(val, 10);
     return Number.isFinite(n) ? n : def;
   }
 
+  /**
+   * @private
+   * @method parseFloat
+   * @description Parses a string into a float.
+   * @param {string} [val] - The string to parse.
+   * @param {number} def - The default value if parsing fails.
+   * @returns {number | undefined} The parsed float or the default.
+   */
   private parseFloat(val: string | undefined, def: number): number | undefined {
     if (val === undefined) return def;
     const n = Number.parseFloat(val);
     return Number.isFinite(n) ? n : def;
   }
 
-  
-
-  
-
+  /**
+   * @private
+   * @method required
+   * @description Ensures a value is not undefined, throwing an error if it is.
+   * @param {string | undefined} val - The value to check.
+   * @param {string} name - The name of the value, for the error message.
+   * @returns {string} The value, if it exists.
+   * @throws {Error} If the value is undefined.
+   */
   private required(val: string | undefined, name: string): string {
     if (!val) throw new Error(`Missing required environment variable: ${name}`);
     return val;

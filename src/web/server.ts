@@ -1,3 +1,8 @@
+/**
+ * @fileoverview This file sets up and runs the Express.js web server that provides the dashboard
+ * for the Yahoo Fantasy Agent. It handles API endpoints for configuration, authentication,
+ * manual bot actions, and viewing logs and metrics.
+ */
 import express from 'express';
 import http from 'http';
 import https from 'https';
@@ -31,7 +36,13 @@ let appSettings = cmInit.loadAppSettings();
 const tradeBlockCache = new Map<string, { ts: number; data: { needs: string[]; surplus: string[]; reasoning: string } }>();
 const TRADE_BLOCK_TTL_MS = 2 * 60 * 1000;
 
-// ---------- Helpers: normalize League/Team keys ----------
+/**
+ * @private
+ * @function normalizeLeagueKeyInput
+ * @description Normalizes a user-provided string into a standard Yahoo league key format.
+ * @param {any} input - The raw input string, potentially a league ID or a full key.
+ * @returns {string} The normalized league key (e.g., 'nfl.l.123456').
+ */
 function normalizeLeagueKeyInput(input: any): string {
   const raw = String(input ?? '').trim();
   if (!raw) return '';
@@ -42,6 +53,14 @@ function normalizeLeagueKeyInput(input: any): string {
   return raw;
 }
 
+/**
+ * @private
+ * @function normalizeTeamKeyInput
+ * @description Normalizes a user-provided string into a standard Yahoo team key format, using the league key as a base.
+ * @param {any} leagueKeyMaybe - The league key to use as a prefix.
+ * @param {any} input - The raw input string, potentially a team ID or a full key.
+ * @returns {string} The normalized team key (e.g., 'nfl.l.123456.t.1').
+ */
 function normalizeTeamKeyInput(leagueKeyMaybe: any, input: any): string {
   const lk = normalizeLeagueKeyInput(leagueKeyMaybe);
   const raw = String(input ?? '').trim();
@@ -57,6 +76,13 @@ function normalizeTeamKeyInput(leagueKeyMaybe: any, input: any): string {
 
 // Simple Server-Sent Events (SSE) broadcaster for push updates
 const sseClients = new Set<http.ServerResponse>();
+/**
+ * @private
+ * @function sseBroadcast
+ * @description Broadcasts a Server-Sent Event (SSE) to all connected dashboard clients.
+ * @param {string} event - The name of the event.
+ * @param {any} payload - The data payload for the event.
+ */
 function sseBroadcast(event: string, payload: any) {
   const data = JSON.stringify(payload ?? {});
   for (const res of sseClients) {
@@ -69,6 +95,12 @@ function sseBroadcast(event: string, payload: any) {
   }
 }
 
+/**
+ * @private
+ * @function configureIncomingTradeWatcher
+ * @description Sets up or tears down a periodic task to check for incoming trade offers based on app settings.
+ * @param {AppSettings} app - The current application settings.
+ */
 function configureIncomingTradeWatcher(app: AppSettings): void {
   try {
     if (incomingTradeWatcher) {
@@ -103,6 +135,12 @@ function configureIncomingTradeWatcher(app: AppSettings): void {
   console.log('Incoming trade watcher enabled (every 60 min).');
 }
 
+/**
+ * @private
+ * @function configureTradeEvaluationScheduler
+ * @description Sets up or tears down a daily scheduler to evaluate potential trades based on app settings.
+ * @param {AppSettings} app - The current application settings.
+ */
 function configureTradeEvaluationScheduler(app: AppSettings): void {
   try {
     if (tradeEvalScheduler) {
@@ -134,11 +172,23 @@ app.use(express.json());
 
 app.use(express.static(path.join(process.cwd(), 'public')));
 
+/**
+ * @route GET /health
+ * @description Health check endpoint to confirm the server is running.
+ * @returns {object} A JSON object with the server status and current time.
+ */
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
-// ---------------- Yahoo OAuth ----------------
+/**
+ * @private
+ * @function computeRedirectUri
+ * @description Computes the correct OAuth redirect URI based on environment settings or request headers.
+ * @param {express.Request} req - The Express request object.
+ * @param {'/auth/callback' | '/oauth/callback'} [overridePath] - An optional path to override the default.
+ * @returns {string} The computed redirect URI.
+ */
 function computeRedirectUri(req: express.Request, overridePath?: '/auth/callback' | '/oauth/callback'): string {
   const cm = new ConfigManager();
   const settings = cm.loadAppSettings();
@@ -162,7 +212,10 @@ function computeRedirectUri(req: express.Request, overridePath?: '/auth/callback
   return `${proto}://${host}${path}`;
 }
 
-// Redirect user to Yahoo authorization URL
+/**
+ * @route GET /auth/yahoo/start
+ * @description Initiates the Yahoo OAuth2 authorization flow by redirecting the user to Yahoo's consent screen.
+ */
 app.get('/auth/yahoo/start', (req, res) => {
   try {
     const cm = new ConfigManager();
@@ -193,7 +246,13 @@ app.get('/auth/yahoo/start', (req, res) => {
   }
 });
 
-// OAuth callback: capture ?code=... and exchange for tokens automatically
+/**
+ * @private
+ * @function handleYahooCallback
+ * @description Handles the OAuth2 callback from Yahoo, exchanging the authorization code for an access token.
+ * @param {express.Request} req - The Express request object.
+ * @param {express.Response} res - The Express response object.
+ */
 async function handleYahooCallback(req: express.Request, res: express.Response) {
   const code = String(req.query.code || '').trim();
   const error = String(req.query.error || '').trim();
@@ -231,11 +290,25 @@ async function handleYahooCallback(req: express.Request, res: express.Response) 
   }
 }
 
-// Support both legacy and new callback paths
+/**
+ * @route GET /oauth/callback
+ * @description The callback endpoint for the Yahoo OAuth2 flow.
+ */
 app.get('/oauth/callback', handleYahooCallback);
+
+/**
+ * @route GET /auth/callback
+ * @description An alternative callback endpoint for the Yahoo OAuth2 flow.
+ */
 app.get('/auth/callback', handleYahooCallback);
 
-// Manual OAuth code exchange: accept a pasted callback URL or explicit code + redirectUri
+/**
+ * @private
+ * @function extractCodeAndRedirect
+ * @description Parses an authorization code and redirect URI from a full callback URL string.
+ * @param {string} fromUrl - The full URL from the browser's address bar.
+ * @returns {{ code?: string; redirectUri?: string; state?: string }} The extracted components.
+ */
 function extractCodeAndRedirect(fromUrl: string): { code?: string; redirectUri?: string; state?: string } {
   try {
     const u = new URL(fromUrl);
@@ -265,6 +338,15 @@ function extractCodeAndRedirect(fromUrl: string): { code?: string; redirectUri?:
   return {};
 }
 
+/**
+ * @route POST /api/oauth/exchange
+ * @description Endpoint for manually exchanging an authorization code for a token, useful for debugging or alternative auth flows.
+ * @param {object} req.body - The request body.
+ * @param {string} [req.body.url] - The full callback URL containing the code.
+ * @param {string} [req.body.code] - The authorization code itself.
+ * @param {string} [req.body.redirectUri] - The redirect URI used in the initial request.
+ * @returns {object} A JSON object indicating success and token status.
+ */
 app.post('/api/oauth/exchange', async (req, res) => {
   const rawUrl = String((req.body?.url || '').toString()).trim();
   let code = String((req.body?.code || '').toString()).trim();
@@ -291,7 +373,11 @@ app.post('/api/oauth/exchange', async (req, res) => {
   }
 });
 
-// Debug: show effective OAuth config
+/**
+ * @route GET /api/oauth/info
+ * @description Provides debugging information about the current OAuth configuration.
+ * @returns {object} A JSON object with the redirect URI and masked client ID.
+ */
 app.get('/api/oauth/info', (req, res) => {
   try {
     const cm = new ConfigManager();
@@ -304,7 +390,10 @@ app.get('/api/oauth/info', (req, res) => {
   }
 });
 
-// Event stream for client auto-refresh
+/**
+ * @route GET /api/stream
+ * @description Establishes a Server-Sent Events (SSE) connection for pushing real-time updates to the client.
+ */
 app.get('/api/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -322,8 +411,11 @@ app.get('/api/stream', (req, res) => {
 
 });
 
-
-// Gemini quota status
+/**
+ * @route GET /api/quota
+ * @description Returns the current status of the Gemini API daily quota.
+ * @returns {object} A JSON object with the quota limit and remaining calls.
+ */
 app.get('/api/quota', (_req, res) => {
   try {
     const { GeminiQuota } = require('../services/GeminiQuota');
@@ -337,7 +429,11 @@ app.get('/api/quota', (_req, res) => {
   }
 });
 
-// Upcoming automation schedule preview (waivers + kickoff checks)
+/**
+ * @route GET /api/schedule/preview
+ * @description Provides a preview of upcoming scheduled tasks, including waivers and kickoff checks.
+ * @returns {object} A JSON object detailing the upcoming scheduled events.
+ */
 app.get('/api/schedule/preview', (_req, res) => {
   try {
     const cm = new ConfigManager();
@@ -433,12 +529,23 @@ app.get('/api/schedule/preview', (_req, res) => {
 });
 
 
-
+/**
+ * @private
+ * @function mask
+ * @description Masks a string for logging, showing only start and end characters.
+ * @param {string} [s] - The string to mask.
+ * @returns {string} The masked string.
+ */
 function mask(s?: string) {
   if (!s) return '';
   return s.length <= 4 ? '*'.repeat(s.length) : `${s.slice(0, 3)}***${s.slice(-2)}`;
 }
 
+/**
+ * @route GET /api/creds
+ * @description Fetches the current status of configured API credentials (Yahoo and Gemini), returning masked values.
+ * @returns {object} A JSON object with the status of the credentials.
+ */
 app.get('/api/creds', (_req, res) => {
   try {
     const cm = new ConfigManager();
@@ -461,6 +568,14 @@ app.get('/api/creds', (_req, res) => {
   }
 });
 
+/**
+ * @route POST /api/creds/yahoo
+ * @description Saves or updates Yahoo client credentials in the secure store.
+ * @param {object} req.body - The request body.
+ * @param {string} req.body.clientId - The Yahoo client ID.
+ * @param {string} req.body.clientSecret - The Yahoo client secret.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/creds/yahoo', (req, res) => {
   try {
     const cm = new ConfigManager();
@@ -484,6 +599,14 @@ app.post('/api/creds/yahoo', (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/creds/gemini
+ * @description Saves or updates Gemini API credentials in the secure store.
+ * @param {object} req.body - The request body.
+ * @param {string} req.body.apiKey - The Gemini API key.
+ * @param {string} [req.body.model] - The Gemini model to use.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/creds/gemini', (req, res) => {
   try {
     const cm = new ConfigManager();
@@ -496,7 +619,11 @@ app.post('/api/creds/gemini', (req, res) => {
   }
 });
 
-// Return raw Gemini credentials (unmasked) for local display in the dashboard
+/**
+ * @route GET /api/creds/gemini/raw
+ * @description Returns the raw, unmasked Gemini credentials. Intended for local dashboard use only.
+ * @returns {object} A JSON object with the raw credentials.
+ */
 app.get('/api/creds/gemini/raw', (_req, res) => {
   try {
     try { res.setHeader('Cache-Control', 'no-store'); } catch {}
@@ -509,8 +636,11 @@ app.get('/api/creds/gemini/raw', (_req, res) => {
   }
 });
 
-// Return raw Yahoo client credentials (unmasked) for local display in the dashboard
-// Note: Intended for local use; avoid exposing broadly.
+/**
+ * @route GET /api/creds/yahoo/raw
+ * @description Returns the raw, unmasked Yahoo credentials. Intended for local dashboard use only.
+ * @returns {object} A JSON object with the raw credentials.
+ */
 app.get('/api/creds/yahoo/raw', (_req, res) => {
   try {
     try { res.setHeader('Cache-Control', 'no-store'); } catch {}
@@ -523,6 +653,14 @@ app.get('/api/creds/yahoo/raw', (_req, res) => {
   }
 });
 
+/**
+ * @route POST /api/bot/run
+ * @description Manually triggers a one-time run of the bot's daily tasks.
+ * @param {object} req.body - The request body.
+ * @param {string} [req.body.leagueKey] - The league key to use.
+ * @param {string} [req.body.teamKey] - The team key to use.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/bot/run', async (req, res) => {
   const s = new ConfigManager().loadAppSettings();
   const leagueKey = normalizeLeagueKeyInput(req.body?.leagueKey || s.leagueKey);
@@ -540,6 +678,13 @@ app.post('/api/bot/run', async (req, res) => {
   }
 });
 
+/**
+ * @route GET /api/roster
+ * @description Fetches the current roster for a given team, including slot assignments.
+ * @param {object} req.query - The query parameters.
+ * @param {string} [req.query.teamKey] - The team key to fetch the roster for.
+ * @returns {object} A JSON object containing the roster.
+ */
 app.get('/api/roster', async (req, res) => {
   const s = new ConfigManager().loadAppSettings();
   const teamKey = normalizeTeamKeyInput(s.leagueKey, (req.query.teamKey as string) || s.teamKey);
@@ -563,7 +708,13 @@ app.get('/api/roster', async (req, res) => {
   }
 });
 
-
+/**
+ * @route GET /api/league
+ * @description Fetches the details for a given league.
+ * @param {object} req.query - The query parameters.
+ * @param {string} [req.query.leagueKey] - The league key to fetch.
+ * @returns {object} A JSON object containing the league details.
+ */
 app.get('/api/league', async (req, res) => {
   const s = new ConfigManager().loadAppSettings();
   const leagueKey = normalizeLeagueKeyInput((req.query.leagueKey as string) || s.leagueKey);
@@ -583,7 +734,11 @@ app.get('/api/league', async (req, res) => {
   }
 });
 
-// League scoring/settings profile (single file: config/league_setting.json)
+/**
+ * @route GET /api/league-config
+ * @description Fetches the league-specific configuration profile.
+ * @returns {object} A JSON object containing the league profile.
+ */
 app.get('/api/league-config', (_req, res) => {
   try {
     const cm = new ConfigManager();
@@ -648,6 +803,12 @@ app.get('/config/league_setting.json', serveLeagueJson);
 // Support subpath deployments: any path ending with /config/league_setting.json
 app.get(/.*\/config\/league_setting\.json$/, serveLeagueJson);
 
+/**
+ * @route POST /api/league-config
+ * @description Saves the league-specific configuration profile.
+ * @param {object} req.body - The league profile object to save.
+ * @returns {object} A JSON object containing the saved profile.
+ */
 app.post('/api/league-config', (req, res) => {
   try {
     const body = req.body || {};
@@ -659,17 +820,35 @@ app.post('/api/league-config', (req, res) => {
   }
 });
 
+/**
+ * @route GET /api/gemini/logs
+ * @description Fetches the most recent Gemini API interaction logs.
+ * @returns {object} A JSON object containing the logs.
+ */
 app.get('/api/gemini/logs', (_req, res) => {
   const logs = GeminiLog.readLast(100);
   res.json({ ok: true, logs });
 });
 
+/**
+ * @route POST /api/gemini/clear
+ * @description Clears all Gemini API interaction logs.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/gemini/clear', (_req, res) => {
   GeminiLog.clear();
   res.json({ ok: true });
   sseBroadcast('gemini', { cleared: true });
 });
 
+/**
+ * @route POST /api/gemini/test
+ * @description Sends a test prompt to the Gemini API.
+ * @param {object} req.body - The request body.
+ * @param {string} req.body.prompt - The user prompt to send.
+ * @param {string} [req.body.system] - The system prompt to use.
+ * @returns {object} A JSON object with the API's response.
+ */
 app.post('/api/gemini/test', async (req, res) => {
   const prompt: string = (req.body?.prompt || '').trim();
   const system: string = req.body?.system || 'You are a helpful assistant.';
@@ -688,6 +867,11 @@ app.post('/api/gemini/test', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/test/trade
+ * @description An endpoint for testing the trade proposal flow.
+ * @returns {object} A JSON object indicating the result of the test trade proposal.
+ */
 app.post('/api/test/trade', async (req, res) => {
   try {
     const leagueKey = req.body?.leagueKey || '461.l.12345'; // Use a real league key here
@@ -749,7 +933,11 @@ app.post('/api/test/trade', async (req, res) => {
   }
 });
 
-// Trades: incoming list
+/**
+ * @route GET /api/trades/incoming
+ * @description Fetches a list of pending incoming trade offers for the configured team.
+ * @returns {object} A JSON object containing the list of trades.
+ */
 app.get('/api/trades/incoming', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -934,7 +1122,11 @@ app.get('/api/trades/incoming', async (req, res) => {
   }
 });
 
-// Dump all transactions (normalized) for diagnostics
+/**
+ * @route GET /api/trades/dump
+ * @description Dumps all transactions for a league for debugging purposes.
+ * @returns {object} A JSON object with the list of transactions.
+ */
 app.get('/api/trades/dump', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -955,7 +1147,13 @@ app.get('/api/trades/dump', async (req, res) => {
   }
 });
 
-// Trades: evaluate a specific incoming trade via Gemini
+/**
+ * @route POST /api/trades/evaluate
+ * @description Evaluates a specific incoming trade offer using the Gemini AI.
+ * @param {object} req.body - The request body.
+ * @param {string} req.body.tradeId - The ID of the trade to evaluate.
+ * @returns {object} A JSON object with the AI's decision.
+ */
 app.post('/api/trades/evaluate', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -990,7 +1188,14 @@ app.post('/api/trades/evaluate', async (req, res) => {
   }
 });
 
-// Trades: respond (accept/decline)
+/**
+ * @route POST /api/trades/respond
+ * @description Submits a response (accept or reject) to a pending trade offer.
+ * @param {object} req.body - The request body.
+ * @param {string} req.body.tradeId - The ID of the trade to respond to.
+ * @param {boolean} req.body.accept - `true` to accept, `false` to reject.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/trades/respond', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -1009,7 +1214,14 @@ app.post('/api/trades/respond', async (req, res) => {
   }
 });
 
-// Trades: fetch by key or trid
+/**
+ * @route GET /api/trades/by-key
+ * @description Fetches a specific transaction by its key or ID.
+ * @param {object} req.query - The query parameters.
+ * @param {string} [req.query.transactionKey] - The full transaction key.
+ * @param {string} [req.query.trid] - The numeric transaction ID.
+ * @returns {object} A JSON object containing the transaction details.
+ */
 app.get('/api/trades/by-key', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -1031,7 +1243,11 @@ app.get('/api/trades/by-key', async (req, res) => {
   }
 });
 
-// Trades: request Gemini to propose a trade for my team and optionally apply it
+/**
+ * @route POST /api/trades/apply
+ * @description Triggers the AI to evaluate and potentially propose a trade, and then applies it if configured.
+ * @returns {object} A JSON object with the AI's decision and the result of the application.
+ */
 app.post('/api/trades/apply', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -1130,7 +1346,11 @@ app.post('/api/trades/apply', async (req, res) => {
   }
 });
 
-// Pickups: ask Gemini for immediate pickup/drop moves and apply them (FA adds), not waiver claims
+/**
+ * @route POST /api/pickups/apply
+ * @description Triggers the AI to find and apply immediate free agent pickups.
+ * @returns {object} A JSON object with the AI's decision and the result of the application.
+ */
 app.post('/api/pickups/apply', async (req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -1332,7 +1552,11 @@ app.post('/api/pickups/apply', async (req, res) => {
   }
 });
 
-// Trade block (needs/surplus)
+/**
+ * @route GET /api/trade-block
+ * @description Fetches the team's positional needs and surpluses, used for identifying trade opportunities.
+ * @returns {object} A JSON object with lists of needs and surpluses.
+ */
 app.get('/api/trade-block', async (req, res) => {
   try {
     const s2 = new ConfigManager().loadAppSettings();
@@ -1385,7 +1609,13 @@ app.get('/api/trade-block', async (req, res) => {
   }
 });
 
-// Preview the exact prompt that would be sent to Gemini for lineup optimization (no API call)
+/**
+ * @route POST /api/gemini/preview
+ * @description Generates a preview of the prompt that would be sent to Gemini for a given task, without making an API call.
+ * @param {object} req.body - The request body.
+ * @param {string} req.body.type - The type of task to preview ('lineup', 'waivers', 'trade').
+ * @returns {object} A JSON object with the generated system and user prompts.
+ */
 app.post('/api/gemini/preview', async (req, res) => {
   try {
     const type = String(req.body?.type || 'lineup');
@@ -1510,6 +1740,11 @@ app.post('/api/gemini/preview', async (req, res) => {
   }
 });
 
+/**
+ * @route GET /api/activity
+ * @description Fetches the most recent bot activity from the audit log.
+ * @returns {object} A JSON object containing a list of recent events.
+ */
 app.get('/api/activity', (_req, res) => {
   try {
     const logPath = path.join(process.cwd(), 'logs', 'audit.log');
@@ -1527,6 +1762,11 @@ app.get('/api/activity', (_req, res) => {
   }
 });
 
+/**
+ * @route GET /api/metrics
+ * @description Provides simple metrics based on the audit log, such as counts of decisions, actions, and errors.
+ * @returns {object} A JSON object with the calculated metrics.
+ */
 app.get('/api/metrics', (_req, res) => {
   try {
     const logPath = path.join(process.cwd(), 'logs', 'audit.log');
@@ -1557,6 +1797,11 @@ app.get('/api/metrics', (_req, res) => {
   }
 });
 
+/**
+ * @route POST /api/logs/clear
+ * @description Clears the main audit log file.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/logs/clear', (_req, res) => {
   try {
     const dir = path.join(process.cwd(), 'logs');
@@ -1570,6 +1815,11 @@ app.post('/api/logs/clear', (_req, res) => {
   }
 });
 
+/**
+ * @route GET /api/env
+ * @description Fetches the current application settings.
+ * @returns {object} A JSON object with the current settings.
+ */
 app.get('/api/env', (_req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
@@ -1597,7 +1847,12 @@ app.get('/api/env', (_req, res) => {
   }
 });
 
-// Persist leagueKey/teamKey into app-settings (no env fallback)
+/**
+ * @route POST /api/env
+ * @description Saves the main application settings (league key, team key, redirect URI).
+ * @param {object} req.body - The settings object to save.
+ * @returns {object} A JSON object with the updated settings.
+ */
 app.post('/api/env', (req, res) => {
   try {
     const body = req.body || {};
@@ -1615,6 +1870,15 @@ app.post('/api/env', (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/schedule
+ * @description Enables or disables the main daily bot scheduler.
+ * @param {object} req.body - The request body.
+ * @param {boolean} req.body.enabled - Whether to enable or disable the schedule.
+ * @param {number} [req.body.hour] - The hour to run the bot.
+ * @param {number} [req.body.minute] - The minute to run the bot.
+ * @returns {object} A JSON object with the updated schedule status.
+ */
 app.post('/api/schedule', (req, res) => {
   try {
     const body = req.body || {};
@@ -1651,7 +1915,11 @@ app.post('/api/schedule', (req, res) => {
   }
 });
 
-// Feature toggles: kickoff scheduler and IR automation
+/**
+ * @route GET /api/features
+ * @description Fetches the current status of all feature toggles.
+ * @returns {object} A JSON object with the status of each feature.
+ */
 app.get('/api/features', (_req, res) => {
   const cm = new ConfigManager();
   const app = cm.loadAppSettings();
@@ -1668,7 +1936,13 @@ app.get('/api/features', (_req, res) => {
   }});
 });
 
-// ---------- Manual run endpoints (kickoff, IR, waivers, trades) ----------
+/**
+ * @private
+ * @function resolveKeys
+ * @description A helper function to resolve and normalize league and team keys from a request's body or query parameters.
+ * @param {express.Request} req - The Express request object.
+ * @returns {{ leagueKey: string; teamKey: string }} The resolved keys.
+ */
 function resolveKeys(req: express.Request): { leagueKey: string; teamKey: string } {
   const s = new ConfigManager().loadAppSettings();
   const body: any = (req as any).body || {};
@@ -1679,6 +1953,11 @@ function resolveKeys(req: express.Request): { leagueKey: string; teamKey: string
   return { leagueKey, teamKey };
 }
 
+/**
+ * @route POST /api/run/kickoff
+ * @description Manually triggers the kickoff check (roster hygiene and lineup optimization).
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/run/kickoff', async (req, res) => {
   try {
     const { leagueKey, teamKey } = resolveKeys(req);
@@ -1691,6 +1970,11 @@ app.post('/api/run/kickoff', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/run/ir
+ * @description Manually triggers the IR automation task.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/run/ir', async (req, res) => {
   try {
     const { leagueKey, teamKey } = resolveKeys(req);
@@ -1703,6 +1987,11 @@ app.post('/api/run/ir', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/run/waivers
+ * @description Manually triggers the waiver claim processing task.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/run/waivers', async (req, res) => {
   try {
     const { leagueKey, teamKey } = resolveKeys(req);
@@ -1715,6 +2004,11 @@ app.post('/api/run/waivers', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/run/pickups
+ * @description Manually triggers the immediate free agent pickup task.
+ * @returns {object} A JSON object with the result of the pickup operation.
+ */
 app.post('/api/run/pickups', async (req, res) => {
   try {
     const { leagueKey, teamKey } = resolveKeys(req);
@@ -1729,6 +2023,11 @@ app.post('/api/run/pickups', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/run/trades
+ * @description Manually triggers the full trade evaluation and response task.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/run/trades', async (req, res) => {
   try {
     const { leagueKey, teamKey } = resolveKeys(req);
@@ -1741,6 +2040,11 @@ app.post('/api/run/trades', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/run/trades/evaluate
+ * @description Manually triggers the trade evaluation task (proposing trades).
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/run/trades/evaluate', async (req, res) => {
   try {
     const { leagueKey, teamKey } = resolveKeys(req);
@@ -1753,6 +2057,11 @@ app.post('/api/run/trades/evaluate', async (req, res) => {
   }
 });
 
+/**
+ * @route POST /api/run/trades/respond
+ * @description Manually triggers the task to respond to incoming trade offers.
+ * @returns {object} A JSON object indicating success.
+ */
 app.post('/api/run/trades/respond', async (req, res) => {
   try {
     const { leagueKey, teamKey } = resolveKeys(req);
@@ -1765,6 +2074,12 @@ app.post('/api/run/trades/respond', async (req, res) => {
   }
 });
 
+/**
+ * @private
+ * @function deriveWaiverSchedule
+ * @description Determines the correct weekly waiver processing schedule by checking app settings and the league profile.
+ * @returns {{ day: number; hour: number; minute: number }} The derived schedule.
+ */
 function deriveWaiverSchedule(): { day: number; hour: number; minute: number } {
   const app = new ConfigManager().loadAppSettings();
   if (app.waiverDay !== undefined || app.waiverHour !== undefined || app.waiverMinute !== undefined) {
@@ -1800,6 +2115,12 @@ function deriveWaiverSchedule(): { day: number; hour: number; minute: number } {
   return { day: 2, hour: 7, minute: 0 };
 }
 
+/**
+ * @route POST /api/features
+ * @description Updates the status of various feature toggles.
+ * @param {object} req.body - The request body, containing keys for the features to update.
+ * @returns {object} A JSON object with the new state of all features.
+ */
 app.post('/api/features', (req, res) => {
   try {
     const body = req.body || {};
@@ -1889,7 +2210,11 @@ app.post('/api/features', (req, res) => {
   }
 });
 
-// Deployment update endpoint - pulls latest code and restarts Docker containers
+/**
+ * @route POST /api/deploy/update
+ * @description An endpoint to trigger a deployment update by pulling the latest code from git and restarting Docker containers.
+ * @returns {object} A JSON object with the results of the deployment steps.
+ */
 app.post('/api/deploy/update', async (req, res) => {
   try {
     const { exec } = require('child_process');
@@ -1940,6 +2265,13 @@ app.post('/api/deploy/update', async (req, res) => {
   }
 });
 
+/**
+ * @function startServer
+ * @description Initializes and starts the web server, either as HTTP or HTTPS based on configuration.
+ * It also sets up schedulers and file watchers after the server starts.
+ * @param {number} [portOverride] - An optional port number to override the default.
+ * @returns {Promise<http.Server | https.Server>} A promise that resolves with the started server instance.
+ */
 export function startServer(portOverride?: number): Promise<http.Server | https.Server> {
   const port = portOverride ?? defaultPort;
   return new Promise((resolve, reject) => {
@@ -2045,7 +2377,10 @@ if (require.main === module) {
   startServer();
 }
 
-// Serve compiled client bundle at /app.js
+/**
+ * @route GET /app.js
+ * @description Serves the compiled client-side JavaScript bundle.
+ */
 app.get('/app.js', (_req, res) => {
   const p = path.join(process.cwd(), 'dist', 'web', 'client.js');
   try {

@@ -12,11 +12,25 @@ import { DecisionType } from '../models/Common';
 import { YahooWriteAdapter } from '../services/YahooWriteAdapter';
 import { computeIrAssignments, computeFlexAssignments } from '../services/RosterHygiene';
 
+/**
+ * @interface BotControllerOptions
+ * @description Options for initializing the BotController.
+ * @property {string} leagueKey - The league key for the fantasy league.
+ * @property {string} teamKey - The team key for the fantasy team.
+ */
 export interface BotControllerOptions {
   leagueKey: string;
   teamKey: string;
 }
 
+/**
+ * @typedef {object} PickupsProcessResult
+ * @description The result of processing free agent pickups.
+ * @property {'applied' | 'dry_run' | 'skipped' | 'error'} outcome - The outcome of the pickup process.
+ * @property {string} [message] - An optional message describing the outcome.
+ * @property {string} [error] - An optional error message if the process failed.
+ * @property {any[]} [claims] - An array of player claims made.
+ */
 type PickupsProcessResult = {
   outcome: 'applied' | 'dry_run' | 'skipped' | 'error';
   message?: string;
@@ -24,6 +38,10 @@ type PickupsProcessResult = {
   claims?: any[];
 };
 
+/**
+ * @class BotController
+ * @description Main controller for the fantasy football bot. Orchestrates all bot activities.
+ */
 export class BotController {
   private readonly yahoo: YahooApiService;
   private readonly decisions: DecisionService | null;
@@ -46,6 +64,10 @@ export class BotController {
     timestamp: number;
   } | null = null;
 
+  /**
+   * @constructor
+   * @param {BotControllerOptions} opts - The options for the bot controller.
+   */
   constructor(opts: BotControllerOptions) {
     const cfgMgr = new ConfigManager();
     const oauth = new YahooOAuthClient(cfgMgr);
@@ -78,6 +100,14 @@ export class BotController {
     this.canonicalKeysResolved = this.isCanonicalKey(this.canonicalLeagueKey, 'league') && this.isCanonicalKey(this.canonicalTeamKey, 'team');
   }
 
+  /**
+   * @private
+   * @method isCanonicalKey
+   * @description Checks if a given key is in the canonical Yahoo API format.
+   * @param {string | undefined} value - The key to check.
+   * @param {'league' | 'team'} kind - The type of key being checked.
+   * @returns {boolean} - True if the key is in canonical format, false otherwise.
+   */
   private isCanonicalKey(value: string | undefined, kind: 'league' | 'team'): boolean {
     if (!value) return false;
     const normalized = String(value).trim();
@@ -87,6 +117,12 @@ export class BotController {
     return false;
   }
 
+  /**
+   * @private
+   * @method setCanonicalKeys
+   * @description Sets the canonical league and team keys.
+   * @param {{ leagueKey?: string | null; teamKey?: string | null }} keys - The keys to set.
+   */
   private setCanonicalKeys(keys: { leagueKey?: string | null; teamKey?: string | null }): void {
     if (keys.leagueKey) {
       this.canonicalLeagueKey = String(keys.leagueKey).trim();
@@ -99,6 +135,12 @@ export class BotController {
     }
   }
 
+  /**
+   * @private
+   * @method ensureCanonicalKeys
+   * @description Ensures that the canonical keys are resolved by fetching them from the Yahoo API if necessary.
+   * @returns {Promise<void>}
+   */
   private async ensureCanonicalKeys(): Promise<void> {
     if (this.canonicalKeysResolved) return;
     try {
@@ -113,15 +155,32 @@ export class BotController {
     }
   }
 
+  /**
+   * @private
+   * @method getLeagueKeyForWrites
+   * @description Gets the appropriate league key for write operations, preferring the canonical key.
+   * @returns {string} The league key.
+   */
   private getLeagueKeyForWrites(): string {
     return (this.isCanonicalKey(this.canonicalLeagueKey, 'league') ? this.canonicalLeagueKey : this.leagueKey) ?? this.leagueKey;
   }
 
+  /**
+   * @private
+   * @method getTeamKeyForWrites
+   * @description Gets the appropriate team key for write operations, preferring the canonical key.
+   * @returns {string} The team key.
+   */
   private getTeamKeyForWrites(): string {
     return (this.isCanonicalKey(this.canonicalTeamKey, 'team') ? this.canonicalTeamKey : this.teamKey) ?? this.teamKey;
   }
 
-  // Roster balance cache management methods
+  /**
+   * @private
+   * @method isRosterBalanceCacheValid
+   * @description Checks if the roster balance cache is still valid.
+   * @returns {boolean} True if the cache is valid, otherwise false.
+   */
   private isRosterBalanceCacheValid(): boolean {
     if (!this.rosterBalanceCache) return false;
     
@@ -132,6 +191,14 @@ export class BotController {
     return cacheAgeMs < maxAgeMs;
   }
 
+  /**
+   * @private
+   * @method getRosterBalance
+   * @description Analyzes the team's roster to determine positional needs and surpluses. Uses a cache to avoid frequent re-analysis.
+   * @param {any[]} roster - The team's current roster.
+   * @param {any} leagueSettings - The league's settings.
+   * @returns {Promise<{ needs: string[]; surplus: string[]; reasoning: string }>} An object containing the roster needs, surplus, and the reasoning behind the analysis.
+   */
   private async getRosterBalance(roster: any[], leagueSettings: any): Promise<{ needs: string[]; surplus: string[]; reasoning: string }> {
     // Return cached result if valid
     if (this.isRosterBalanceCacheValid()) {
@@ -173,6 +240,11 @@ export class BotController {
     return { needs, surplus, reasoning };
   }
 
+  /**
+   * @method runDaily
+   * @description Runs the main daily tasks for the bot, including roster hygiene, lineup optimization, waiver claims, and trade evaluations.
+   * @returns {Promise<void>}
+   */
   async runDaily(): Promise<void> {
     this.audit.recordAction('daily_start');
     await this.metrics.time('dailyRun', async () => {
@@ -234,10 +306,20 @@ export class BotController {
     this.audit.recordAction('daily_end');
   }
 
+  /**
+   * @method runIncomingTradeCheck
+   * @description Runs a check for incoming trade offers and responds to them.
+   * @returns {Promise<void>}
+   */
   async runIncomingTradeCheck(): Promise<void> {
     await this.runTradeResponses();
   }
 
+  /**
+   * @method runTradeEvaluations
+   * @description Initiates the process of evaluating potential trades with other teams in the league.
+   * @returns {Promise<void>}
+   */
   async runTradeEvaluations(): Promise<void> {
     const app = new ConfigManager().loadAppSettings();
     if (!app.tradesAutomationEnabled) {
@@ -247,6 +329,11 @@ export class BotController {
     await this.evaluateTrades();
   }
 
+  /**
+   * @method runTradeResponses
+   * @description Initiates the process of responding to incoming trade offers.
+   * @returns {Promise<void>}
+   */
   async runTradeResponses(): Promise<void> {
     const app = new ConfigManager().loadAppSettings();
     if (!app.tradeResponsesAutomationEnabled) {
@@ -256,7 +343,12 @@ export class BotController {
     await this.processIncomingTradeOffers();
   }
 
-  // Evaluate immediate free-agent pickups and apply add/drops (strict drop enforcement when roster full)
+  /**
+   * @private
+   * @method processPickups
+   * @description Evaluates and executes immediate free-agent pickups.
+   * @returns {Promise<PickupsProcessResult>} The result of the pickup process.
+   */
   private async processPickups(): Promise<PickupsProcessResult> {
     try {
       if (!this.decisions) {
@@ -330,26 +422,49 @@ export class BotController {
     }
   }
 
-  // Public wrapper for weekly waiver scheduler
+  /**
+   * @method runWaivers
+   * @description Public wrapper to initiate the weekly waiver claim process.
+   * @returns {Promise<void>}
+   */
   async runWaivers(): Promise<void> {
     await this.processWaivers();
   }
 
+  /**
+   * @method runPickups
+   * @description Public wrapper to initiate the immediate free-agent pickup process.
+   * @returns {Promise<PickupsProcessResult>} The result of the pickup process.
+   */
   async runPickups(): Promise<PickupsProcessResult> {
     return this.processPickups();
   }
 
-  // Expose IR hygiene as a direct action
+  /**
+   * @method runIR
+   * @description Public wrapper to run roster hygiene, specifically for IR assignments.
+   * @returns {Promise<void>}
+   */
   async runIR(): Promise<void> {
     await this.runRosterHygiene();
   }
 
-  // Expose trades automation (evaluate + respond) as a direct action
+  /**
+   * @method runTrades
+   * @description Public wrapper to run the full trade automation process (evaluate and respond).
+   * @returns {Promise<void>}
+   */
   async runTrades(): Promise<void> {
     await this.runTradeEvaluations();
     await this.runTradeResponses();
   }
 
+  /**
+   * @private
+   * @method runRosterHygiene
+   * @description Performs roster hygiene tasks, such as moving players to/from the IR slot and optimizing bench positions.
+   * @returns {Promise<void>}
+   */
   private async runRosterHygiene() {
     try {
       await this.ensureCanonicalKeys();
@@ -387,6 +502,12 @@ export class BotController {
     }
   }
 
+  /**
+   * @private
+   * @method optimizeLineup
+   * @description Analyzes the current roster and sets the optimal lineup for the upcoming week.
+   * @returns {Promise<void>}
+   */
   private async optimizeLineup() {
     try {
       await this.ensureCanonicalKeys();
@@ -456,6 +577,12 @@ export class BotController {
     }
   }
 
+  /**
+   * @private
+   * @method processWaivers
+   * @description Evaluates players on the waiver wire and submits claims based on AI analysis.
+   * @returns {Promise<void>}
+   */
   private async processWaivers() {
     try {
       await this.ensureCanonicalKeys();
@@ -590,6 +717,12 @@ export class BotController {
     }
   }
 
+  /**
+   * @private
+   * @method evaluateTrades
+   * @description Evaluates potential trades with other teams in the league by analyzing roster needs and surpluses.
+   * @returns {Promise<void>}
+   */
   private async evaluateTrades() {
     try {
       await this.ensureCanonicalKeys();
@@ -701,7 +834,12 @@ export class BotController {
     }
   }
 
-  // Check incoming trade offers and auto-respond per thresholds
+  /**
+   * @private
+   * @method processIncomingTradeOffers
+   * @description Checks for and responds to incoming trade offers from other teams.
+   * @returns {Promise<void>}
+   */
   private async processIncomingTradeOffers() {
     try {
       await this.ensureCanonicalKeys();
@@ -769,7 +907,11 @@ export class BotController {
     }
   }
 
-  // Lightweight kickoff-time check: run hygiene and lineup optimization
+  /**
+   * @method runKickoffCheck
+   * @description A lightweight check to be run around game kickoff times to perform last-minute lineup optimization and roster hygiene.
+   * @returns {Promise<void>}
+   */
   async runKickoffCheck(): Promise<void> {
     try {
       this.audit.recordAction('kickoff_check_start');

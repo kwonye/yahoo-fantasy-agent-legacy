@@ -1,3 +1,6 @@
+/**
+ * @fileoverview A demonstration script for testing and showcasing Yahoo API connectivity and basic data fetching.
+ */
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { ConfigManager } from '../services';
@@ -6,12 +9,26 @@ import { YahooApiService } from '../services/YahooApiService';
 
 dotenv.config();
 
+/**
+ * @function mask
+ * @description Masks a string for logging purposes, showing only the first and last few characters.
+ * @param {string} [val] - The string to mask.
+ * @returns {string} The masked string.
+ */
 function mask(val?: string): string {
   if (!val) return '';
   if (val.length <= 6) return '*'.repeat(val.length);
   return `${val.slice(0, 3)}***${val.slice(-3)}`;
 }
 
+/**
+ * @function ensureAuth
+ * @description Ensures that a valid Yahoo OAuth token is available, guiding the user through the
+ * authentication process if necessary.
+ * @param {YahooOAuthClient} oauth - The Yahoo OAuth client instance.
+ * @param {ConfigManager} mgr - The configuration manager instance.
+ * @returns {Promise<string>} A valid access token.
+ */
 async function ensureAuth(oauth: YahooOAuthClient, mgr: ConfigManager) {
   try {
     const token = await oauth.getValidAccessToken();
@@ -32,6 +49,11 @@ async function ensureAuth(oauth: YahooOAuthClient, mgr: ConfigManager) {
   }
 }
 
+/**
+ * @function main
+ * @description The main function for the demo script. It initializes services, ensures authentication,
+ * and fetches sample data from the Yahoo API, such as league details and team rosters.
+ */
 async function main() {
   console.log('Yahoo API demo starting...');
   const mgr = new ConfigManager();

@@ -1,18 +1,51 @@
+/**
+ * @fileoverview A scheduler for running tasks at specific times relative to NFL game kickoffs.
+ */
+
+/**
+ * @typedef {function} KickoffTask
+ * @description A function to be executed by the scheduler. Can be synchronous or asynchronous.
+ */
 export type KickoffTask = () => Promise<void> | void;
 
+/**
+ * @private
+ * @interface WindowDef
+ * @description Defines a weekly time window.
+ * @property {number} dow - Day of the week (0=Sunday, 6=Saturday).
+ * @property {number} hh - Hour of the day (0-23).
+ * @property {number} mm - Minute of the hour (0-59).
+ */
 interface WindowDef { dow: number; hh: number; mm: number }
 
+/**
+ * @interface KickoffOptions
+ * @description Options for configuring the KickoffScheduler.
+ * @property {number[]} [preMinutes] - An array of minutes before each kickoff window to run the task. Defaults to `[30]`.
+ * @property {WindowDef[]} [windows] - An array of kickoff time windows to schedule against. Defaults to standard NFL kickoff times.
+ * @property {string} [timeZone] - The IANA time zone for interpreting kickoff windows. Defaults to 'America/New_York'.
+ */
 export interface KickoffOptions {
   preMinutes?: number[]; // Minutes before kickoff to run checks - defaults to [30] (only 30 minutes before)
   windows?: WindowDef[]; // NFL weekly windows (ET canonical): Thu 20:15, Sun 09:30, Sun 13:00, Sun 16:05, Sun 16:25, Sun 20:20, Mon 20:15
   timeZone?: string; // IANA zone for interpreting kickoff windows (default: America/New_York)
 }
 
+/**
+ * @class KickoffScheduler
+ * @description Schedules a task to run at specific times relative to standard NFL game kickoff windows.
+ * This is useful for performing actions like last-minute lineup checks.
+ */
 export class KickoffScheduler {
   private timers: NodeJS.Timeout[] = [];
   private readonly opts: Required<Omit<KickoffOptions, 'timeZone'>> & { timeZone: string };
   private readonly task: KickoffTask;
 
+  /**
+   * @constructor
+   * @param {KickoffTask} task - The task to be executed at scheduled times.
+   * @param {KickoffOptions} [opts={}] - Configuration options for the scheduler.
+   */
   constructor(task: KickoffTask, opts: KickoffOptions = {}) {
     this.task = task;
     this.opts = {
@@ -30,6 +63,10 @@ export class KickoffScheduler {
     };
   }
 
+  /**
+   * @method start
+   * @description Starts the scheduler. It clears any existing timers and schedules new ones based on the configured windows.
+   */
   start() {
     this.stop();
     for (const w of this.opts.windows) {
@@ -39,11 +76,22 @@ export class KickoffScheduler {
     }
   }
 
+  /**
+   * @method stop
+   * @description Stops all currently scheduled timers.
+   */
   stop() {
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
   }
 
+  /**
+   * @private
+   * @method scheduleNext
+   * @description Calculates the next run time for a given window and pre-kickoff minute offset, then sets a timer.
+   * @param {WindowDef} w - The kickoff window definition.
+   * @param {number} pre - The number of minutes before kickoff to run the task.
+   */
   private scheduleNext(w: WindowDef, pre: number) {
     const { DateTime } = require('luxon');
     const zone = this.opts.timeZone;
@@ -56,6 +104,14 @@ export class KickoffScheduler {
     this.setTimer(runAt.toJSDate(), w, pre);
   }
 
+  /**
+   * @private
+   * @method setTimer
+   * @description Sets a Node.js `setTimeout` to execute the task and then reschedule the next occurrence.
+   * @param {Date} when - The exact date and time to run the task.
+   * @param {WindowDef} w - The kickoff window definition for rescheduling.
+   * @param {number} pre - The pre-kickoff minute offset for rescheduling.
+   */
   private setTimer(when: Date, w: WindowDef, pre: number) {
     const delay = Math.max(0, when.getTime() - Date.now());
     const t = setTimeout(async () => {
@@ -67,6 +123,17 @@ export class KickoffScheduler {
   }
 }
 
+/**
+ * @private
+ * @function nextDowTimeZoned
+ * @description Calculates the next occurrence of a specific day-of-week and time in a given time zone.
+ * @param {number} dow - The target day of the week (0=Sunday).
+ * @param {number} hh - The target hour.
+ * @param {number} mm - The target minute.
+ * @param {any} now - The current time as a Luxon DateTime object.
+ * @param {string} zone - The IANA time zone.
+ * @returns {any} A Luxon DateTime object representing the next occurrence.
+ */
 function nextDowTimeZoned(dow: number, hh: number, mm: number, now: any, zone: string) {
   const { DateTime } = require('luxon');
   const currDow0 = now.weekday % 7; // 0..6

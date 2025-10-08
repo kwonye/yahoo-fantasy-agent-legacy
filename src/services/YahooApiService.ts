@@ -1,13 +1,28 @@
+/**
+ * @fileoverview A service for interacting with the Yahoo Fantasy Sports API.
+ * It handles authentication, making API requests, and parsing the responses.
+ */
 import axios, { AxiosInstance } from 'axios';
 import { YahooOAuthClient } from './YahooOAuthClient';
 import { League, LeagueSettings, Lineup, Player, Position } from '../models';
 import { TradeProposal, WaiverClaim } from '../models/Decision';
 
+/**
+ * @class YahooApiService
+ * @description Provides methods for interacting with the Yahoo Fantasy Sports API.
+ * This class abstracts away the complexities of authentication, request/response formats (JSON/XML),
+ * and data parsing.
+ */
 export class YahooApiService {
   private readonly http: AxiosInstance;
   private readonly baseUrl: string;
   private readonly oauth: YahooOAuthClient;
 
+  /**
+   * @constructor
+   * @param {YahooOAuthClient} oauth - An instance of the YahooOAuthClient for handling authentication.
+   * @param {string} [baseUrl='https://fantasysports.yahooapis.com/fantasy/v2'] - The base URL for the Yahoo API.
+   */
   constructor(oauth: YahooOAuthClient, baseUrl = 'https://fantasysports.yahooapis.com/fantasy/v2') {
     this.oauth = oauth;
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -51,7 +66,6 @@ export class YahooApiService {
     throw lastErr;
   }
 
-  // ---------------- XML write helpers (best-effort scaffolding) ----------------
   private async sendXml(method: 'POST' | 'PUT', pathname: string, xml: string): Promise<any> {
     const headers = { ...(await this.authHeaders()), 'Content-Type': 'application/xml' };
     const url = `${this.baseUrl}${pathname}`;
@@ -83,6 +97,13 @@ export class YahooApiService {
     return this.sendXml('PUT', pathname, xml);
   }
 
+  /**
+   * @method updateRosterXml
+   * @description Updates a team's roster using a pre-built XML payload.
+   * @param {string} teamKey - The key of the team to update.
+   * @param {string} xml - The XML payload for the roster update.
+   * @returns {Promise<{ success: boolean }>} An object indicating success.
+   */
   async updateRosterXml(teamKey: string, xml: string): Promise<{ success: boolean }> {
     // Back-compat helper when callers pre-build XML payloads.
     const path = `/team/${encodeURIComponent(teamKey)}/roster;players`;
@@ -90,6 +111,14 @@ export class YahooApiService {
     return { success: true };
   }
 
+  /**
+   * @method updateRosterAssignments
+   * @description Updates a team's roster by generating and sending an XML payload from structured assignments.
+   * @param {string} teamKey - The key of the team to update.
+   * @param {Array<{ position: string; playerId: string }>} assignments - The player assignments to apply.
+   * @param {{ week?: number; coverageType?: string }} [opts={}] - Options for the update, like the week.
+   * @returns {Promise<{ success: boolean; xml: string; week?: number }>} An object indicating success, the generated XML, and the week.
+   */
   async updateRosterAssignments(
     teamKey: string,
     assignments: Array<{ position: string; playerId: string }>,
@@ -149,24 +178,51 @@ export class YahooApiService {
     return { success: true, xml, week };
   }
 
+  /**
+   * @method submitTransactionsXml
+   * @description Submits generic transactions using a pre-built XML payload.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} xml - The XML payload for the transactions.
+   * @returns {Promise<{ success: boolean; id?: string }>} An object indicating success and the transaction ID.
+   */
   async submitTransactionsXml(leagueKey: string, xml: string): Promise<{ success: boolean; id?: string }> {
     const path = `/league/${encodeURIComponent(leagueKey)}/transactions`;
     const data = await this.postXml(path, xml);
     return { success: true, id: data?.transaction?.id };
   }
 
+  /**
+   * @method submitAddDropTransactionsXml
+   * @description Submits add/drop transactions using a pre-built XML payload.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} xml - The XML payload for the add/drop transactions.
+   * @returns {Promise<{ success: boolean; id?: string }>} An object indicating success and the transaction ID.
+   */
   async submitAddDropTransactionsXml(leagueKey: string, xml: string): Promise<{ success: boolean; id?: string }> {
     const path = `/league/${encodeURIComponent(leagueKey)}/transactions;type=add/drop`;
     const data = await this.postXml(path, xml);
     return { success: true, id: data?.transaction?.id };
   }
 
+  /**
+   * @method proposeTradeXml
+   * @description Proposes a trade using a pre-built XML payload.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} xml - The XML payload for the trade proposal.
+   * @returns {Promise<{ success: boolean; id?: string }>} An object indicating success and the transaction ID.
+   */
   async proposeTradeXml(leagueKey: string, xml: string): Promise<{ success: boolean; id?: string }> {
     const path = `/league/${encodeURIComponent(leagueKey)}/transactions`;
     const data = await this.postXml(path, xml);
     return { success: true, id: data?.transaction?.id };
   }
 
+  /**
+   * @method getLeague
+   * @description Fetches and parses league data.
+   * @param {string} leagueKey - The key of the league to fetch.
+   * @returns {Promise<League>} The parsed league data.
+   */
   async getLeague(leagueKey: string): Promise<League> {
     const url = `${this.baseUrl}/league/${encodeURIComponent(leagueKey)}?format=json`;
     const data = await this.getJson(url);
@@ -174,7 +230,12 @@ export class YahooApiService {
     return this.mapLeague(data, leagueKey);
   }
 
-  // Fetch all teams for a league with keys and (optional) names
+  /**
+   * @method getLeagueTeams
+   * @description Fetches all teams for a given league.
+   * @param {string} leagueKey - The key of the league.
+   * @returns {Promise<Array<{ key: string; name?: string }>>} A list of teams with their keys and names.
+   */
   async getLeagueTeams(leagueKey: string): Promise<Array<{ key: string; name?: string }>> {
     const url = `${this.baseUrl}/league/${encodeURIComponent(leagueKey)}/teams?format=json`;
     const data = await this.getJson(url);
@@ -213,6 +274,13 @@ export class YahooApiService {
     return out;
   }
 
+  /**
+   * @method getTeamRoster
+   * @description Fetches the roster for a given team and week.
+   * @param {string} teamKey - The key of the team.
+   * @param {number} [week] - The week to fetch the roster for. Defaults to the current week.
+   * @returns {Promise<Player[]>} A list of players on the roster.
+   */
   async getTeamRoster(teamKey: string, week?: number): Promise<Player[]> {
     // If week is not provided, derive leagueKey from teamKey and try to load currentWeek
     let targetWeek = week;
@@ -266,7 +334,12 @@ export class YahooApiService {
     }
   }
 
-  // ---------------- Team info (FAAB, priority, name) ----------------
+  /**
+   * @method getTeamInfo
+   * @description Fetches basic information for a team, such as name, FAAB balance, and waiver priority.
+   * @param {string} teamKey - The key of the team.
+   * @returns {Promise<{ id: string; name?: string; faabBalance?: number; waiverPriority?: number }>} The team's information.
+   */
   async getTeamInfo(teamKey: string): Promise<{ id: string; name?: string; faabBalance?: number; waiverPriority?: number }>{
     const url = `${this.baseUrl}/team/${encodeURIComponent(teamKey)}?format=json`;
     const data = await this.getJson(url);
@@ -298,6 +371,13 @@ export class YahooApiService {
     return info as { id: string; name?: string; faabBalance?: number; waiverPriority?: number };
   }
 
+  /**
+   * @method setLineup
+   * @description Sets a team's lineup. This is a compatibility helper for tests and may not work with the live Yahoo API, which expects XML.
+   * @param {string} _teamKey - The key of the team.
+   * @param {Lineup} _lineup - The lineup to set.
+   * @returns {Promise<void>}
+   */
   async setLineup(_teamKey: string, _lineup: Lineup): Promise<void> {
     // Compatibility helper for tests/dev tools: POST JSON to a pseudo endpoint.
     // Real Yahoo writes require XML; use updateRosterXml() in production.
@@ -306,6 +386,13 @@ export class YahooApiService {
     await this.http.post(url, { lineup: _lineup }, { headers });
   }
 
+  /**
+   * @method getWaiverWirePlayers
+   * @description Fetches players available on the waiver wire.
+   * @param {string} leagueKey - The key of the league.
+   * @param {number} [count=25] - The number of players to fetch.
+   * @returns {Promise<Player[]>} A list of available players.
+   */
   async getWaiverWirePlayers(leagueKey: string, count: number = 25): Promise<Player[]> {
     // Per Yahoo Fantasy Sports API: /league/{league_key}/players;status=W and /players;status=FA
     // Try waivers first, then free agents as fallback.
@@ -331,7 +418,13 @@ export class YahooApiService {
     return [];
   }
 
-  // Return only immediate free agents (not players on waivers)
+  /**
+   * @method getFreeAgents
+   * @description Fetches players who are immediate free agents (not on waivers).
+   * @param {string} leagueKey - The key of the league.
+   * @param {number} [count=25] - The number of players to fetch.
+   * @returns {Promise<Player[]>} A list of available free agents.
+   */
   async getFreeAgents(leagueKey: string, count: number = 25): Promise<Player[]> {
     const base = `${this.baseUrl}/league/${encodeURIComponent(leagueKey)}`;
     const urls = [
@@ -352,7 +445,15 @@ export class YahooApiService {
     return [];
   }
 
-  // ---------------- Trades (reads) ----------------
+  /**
+   * @method getAllTransactionsNormalized
+   * @description Fetches and normalizes all transactions for a league or team.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} [teamKey] - The optional key of a specific team.
+   * @param {number} [count=200] - The number of transactions to fetch.
+   * @param {{ tried: string[] }} [dbg] - Optional debug object to record attempted URLs.
+   * @returns {Promise<any[]>} A list of normalized transaction objects.
+   */
   async getAllTransactionsNormalized(leagueKey: string, teamKey?: string, count: number = 200, dbg?: { tried: string[] }): Promise<any[]> {
     // Resolve canonical keys
     let canonicalLeagueKey = leagueKey;
@@ -414,6 +515,13 @@ export class YahooApiService {
     }
     return unique;
   }
+
+  /**
+   * @method getTransactionByKey
+   * @description Fetches a single transaction by its full transaction key.
+   * @param {string} transactionKey - The full key of the transaction (e.g., '422.l.12345.tr.1').
+   * @returns {Promise<any | null>} The normalized transaction object, or null if not found.
+   */
   async getTransactionByKey(transactionKey: string): Promise<any | null> {
     const url = `${this.baseUrl}/transaction/${encodeURIComponent(transactionKey)}?format=json`;
     const data = await this.getJson(url);
@@ -424,6 +532,13 @@ export class YahooApiService {
     return this.normalizeTransaction(tx);
   }
 
+  /**
+   * @method getTransactionById
+   * @description Fetches a single transaction by its numeric ID and league key.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string | number} trid - The numeric ID of the transaction.
+   * @returns {Promise<any | null>} The normalized transaction object, or null if not found.
+   */
   async getTransactionById(leagueKey: string, trid: string | number): Promise<any | null> {
     // Resolve canonical league key with game id prefix (e.g., 461.l.399238)
     let canonicalLeagueKey = leagueKey;
@@ -434,6 +549,15 @@ export class YahooApiService {
     const transactionKey = `${canonicalLeagueKey}.tr.${trid}`;
     return this.getTransactionByKey(transactionKey);
   }
+
+  /**
+   * @method getPendingTrades
+   * @description Fetches all pending trades for a given league or team.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} [teamKey] - The optional key of a specific team to filter by.
+   * @param {{ tried: string[] }} [dbg] - Optional debug object to record attempted URLs.
+   * @returns {Promise<any[]>} A list of normalized pending trade objects.
+   */
   async getPendingTrades(leagueKey: string, teamKey?: string, dbg?: { tried: string[] }): Promise<any[]> {
     // Resolve canonical (numeric) league key if possible
     let canonicalLeagueKey = leagueKey;
@@ -723,6 +847,13 @@ export class YahooApiService {
     return players;
   }
 
+  /**
+   * @method submitWaiverClaims
+   * @description Submits waiver claims. This is a compatibility helper for tests and may not work with the live Yahoo API, which expects XML.
+   * @param {string} _leagueKey - The key of the league.
+   * @param {WaiverClaim[]} _claims - The waiver claims to submit.
+   * @returns {Promise<{ success: boolean }>} An object indicating success.
+   */
   async submitWaiverClaims(_leagueKey: string, _claims: WaiverClaim[]): Promise<{ success: boolean }>{
     // Compatibility helper for tests/dev tools. Real API uses XML via submitTransactionsXml().
     const url = `${this.baseUrl}/league/${encodeURIComponent(_leagueKey)}/waivers`;
@@ -731,6 +862,15 @@ export class YahooApiService {
     return { success: !!(data && (data.success === true || data.ok === true)) };
   }
 
+  /**
+   * @method getRecentDropsToWaivers
+   * @description Fetches players who were recently dropped to waivers by a specific team.
+   * @param {string} teamKey - The key of the team that dropped the players.
+   * @param {string} leagueKey - The key of the league.
+   * @param {number} sinceMs - A timestamp in milliseconds to filter for drops that occurred after this time.
+   * @param {number} [limit=40] - The maximum number of transactions to scan.
+   * @returns {Promise<Array<{ playerId: string; playerKey?: string; playerName?: string; droppedAt: number }>>} A list of dropped players.
+   */
   async getRecentDropsToWaivers(
     teamKey: string,
     leagueKey: string,
@@ -793,6 +933,13 @@ export class YahooApiService {
     return false;
   }
 
+  /**
+   * @method proposeTrade
+   * @description Proposes a trade. This is a compatibility helper for tests and may not work with the live Yahoo API, which expects XML.
+   * @param {string} _leagueKey - The key of the league.
+   * @param {TradeProposal} _proposal - The trade proposal object.
+   * @returns {Promise<{ success: boolean; id?: string }>} An object indicating success and the transaction ID.
+   */
   async proposeTrade(_leagueKey: string, _proposal: TradeProposal): Promise<{ success: boolean; id?: string }>{
     // Compatibility helper for tests/dev tools. Real API uses XML via proposeTradeXml().
     const url = `${this.baseUrl}/league/${encodeURIComponent(_leagueKey)}/trades`;
@@ -814,7 +961,6 @@ export class YahooApiService {
     } as Player;
   }
 
-  // ---------------- Yahoo mapping helpers ----------------
   private mapLeague(data: any, fallbackKey: string): League {
     // Support both simplified test shape and Yahoo fantasy_content shape
     if (data?.league) {
@@ -926,7 +1072,13 @@ export class YahooApiService {
     return [];
   }
 
-  // Returns roster entries with selected lineup slot if available
+  /**
+   * @method getTeamRosterWithSlots
+   * @description Fetches a team's roster, including the specific slot each player is in.
+   * @param {string} teamKey - The key of the team.
+   * @param {number} [week] - The week to fetch the roster for. Defaults to the current week.
+   * @returns {Promise<Array<{ slot?: string; player: Player }>>} A list of roster entries with slot information.
+   */
   async getTeamRosterWithSlots(teamKey: string, week?: number): Promise<Array<{ slot?: string; player: Player }>> {
     // Derive week if not provided
     let targetWeek = week;

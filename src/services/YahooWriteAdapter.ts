@@ -1,3 +1,7 @@
+/**
+ * @fileoverview This file contains the YahooWriteAdapter class, which is responsible
+ * for translating abstract bot decisions into concrete XML payloads for the Yahoo Fantasy API.
+ */
 import fs from 'fs';
 import path from 'path';
 import { YahooApiService } from './YahooApiService';
@@ -5,21 +9,43 @@ import { Lineup } from '../models/Lineup';
 import { Player } from '../models/Player';
 import { WaiverDecision, TradeDecision } from '../models/Decision';
 
+/**
+ * @interface YahooWriteAdapterOptions
+ * @description Options for configuring the YahooWriteAdapter.
+ * @property {string} [dumpDir] - The directory to dump write payloads for debugging purposes.
+ * @property {boolean} [debugYahoo] - A flag to enable or disable debug dumping.
+ */
 export interface YahooWriteAdapterOptions {
   dumpDir?: string; // defaults to logs/yahoo_write_payloads
   debugYahoo?: boolean; // Added this
 }
 
+/**
+ * @interface LineupAssignment
+ * @description Represents the assignment of a player to a specific lineup position.
+ * @property {string} position - The target position (e.g., 'QB', 'RB', 'BN', 'IR').
+ * @property {string} playerId - The unique identifier of the player.
+ */
 export interface LineupAssignment {
   position: string;
   playerId: string;
 }
 
+/**
+ * @class YahooWriteAdapter
+ * @description This class acts as an adapter to format and send write requests (lineup changes, waiver claims, trades)
+ * to the Yahoo Fantasy API. It translates abstract decisions into the required XML format.
+ */
 export class YahooWriteAdapter {
   private readonly api: YahooApiService;
   private readonly dumpDir: string;
   private readonly debugYahoo: boolean; // Dashboard-controlled
 
+  /**
+   * @constructor
+   * @param {YahooApiService} api - An instance of the YahooApiService for making API calls.
+   * @param {YahooWriteAdapterOptions} [opts={}] - Configuration options for the adapter.
+   */
   constructor(api: YahooApiService, opts: YahooWriteAdapterOptions = {}) {
     this.api = api;
     this.dumpDir = opts.dumpDir ?? path.join(process.cwd(), 'logs', 'yahoo_write_payloads');
@@ -33,6 +59,13 @@ export class YahooWriteAdapter {
     }
   }
 
+  /**
+   * @method planLineupAssignments
+   * @description Translates a target lineup object into a list of specific player-to-position assignments.
+   * @param {Player[]} _roster - The current roster (currently unused in this implementation).
+   * @param {Lineup} target - The target lineup to generate assignments for.
+   * @returns {LineupAssignment[]} An array of lineup assignments.
+   */
   planLineupAssignments(_roster: Player[], target: Lineup): LineupAssignment[] {
     const assignments: LineupAssignment[] = [];
     for (const [position, player] of Object.entries(target.starters || {})) {
@@ -50,6 +83,12 @@ export class YahooWriteAdapter {
     return assignments;
   }
 
+  /**
+   * @method buildLineupPayload
+   * @description Builds a JSON payload for a lineup update, primarily for debugging and logging.
+   * @param {LineupAssignment[]} assignments - The list of lineup assignments.
+   * @returns {{ type: string; assignments: LineupAssignment[] }} A structured payload object.
+   */
   buildLineupPayload(assignments: LineupAssignment[]) {
     // Yahoo typically expects per-player position changes; shape for debugging only
     return {
@@ -58,6 +97,13 @@ export class YahooWriteAdapter {
     };
   }
 
+  /**
+   * @method applyAssignments
+   * @description Applies a set of lineup assignments to a team's roster.
+   * @param {string} teamKey - The key of the team to update.
+   * @param {LineupAssignment[]} assignments - The assignments to apply.
+   * @returns {Promise<{ success: boolean }>} An object indicating whether the operation was successful.
+   */
   async applyAssignments(teamKey: string, assignments: LineupAssignment[]): Promise<{ success: boolean }> {
     this.dump('assignments', this.buildLineupPayload(assignments));
     try {
@@ -77,6 +123,13 @@ export class YahooWriteAdapter {
     }
   }
 
+  /**
+   * @method applyLineup
+   * @description A convenience method to apply a full lineup to a team's roster.
+   * @param {string} teamKey - The key of the team to update.
+   * @param {Lineup} target - The target lineup.
+   * @returns {Promise<{ success: boolean }>} An object indicating whether the operation was successful.
+   */
   async applyLineup(teamKey: string, target: Lineup): Promise<{ success: boolean }> {
     const assignments = this.planLineupAssignments([], target);
     this.dump('lineup', this.buildLineupPayload(assignments));
@@ -89,6 +142,12 @@ export class YahooWriteAdapter {
     }
   }
 
+  /**
+   * @method buildWaiverPayload
+   * @description Builds a JSON payload for waiver claims, for debugging.
+   * @param {WaiverDecision} decision - The waiver decision object.
+   * @returns {object} A structured payload object.
+   */
   buildWaiverPayload(decision: WaiverDecision) {
     return {
       type: 'waiver_claims',
@@ -102,6 +161,12 @@ export class YahooWriteAdapter {
     };
   }
 
+  /**
+   * @method buildPickupPayload
+   * @description Builds a JSON payload for immediate pickups, for debugging.
+   * @param {WaiverDecision} decision - The pickup decision object.
+   * @returns {object} A structured payload object.
+   */
   buildPickupPayload(decision: WaiverDecision) {
     return {
       type: 'immediate_pickups',
@@ -109,6 +174,14 @@ export class YahooWriteAdapter {
     };
   }
 
+  /**
+   * @method applyWaivers
+   * @description Submits waiver claims to the Yahoo API.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} myTeamKey - The key of the team submitting the claims.
+   * @param {WaiverDecision} decision - The waiver decision containing the claims.
+   * @returns {Promise<{ success: boolean }>} An object indicating whether the operation was successful.
+   */
   async applyWaivers(leagueKey: string, myTeamKey: string, decision: WaiverDecision): Promise<{ success: boolean }> {
     const payload = this.buildWaiverPayload(decision);
     this.dump('waivers', payload);
@@ -122,6 +195,14 @@ export class YahooWriteAdapter {
     }
   }
 
+  /**
+   * @method applyPickups
+   * @description Submits immediate free agent pickups to the Yahoo API.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} myTeamKey - The key of the team submitting the pickups.
+   * @param {WaiverDecision} decision - The pickup decision containing the add/drop moves.
+   * @returns {Promise<{ success: boolean; error?: string }>} An object indicating success or failure, with an optional error message.
+   */
   async applyPickups(
     leagueKey: string,
     myTeamKey: string,
@@ -173,6 +254,12 @@ export class YahooWriteAdapter {
     return { success: true };
   }
 
+  /**
+   * @method buildTradePayload
+   * @description Builds a JSON payload for a trade proposal, for debugging.
+   * @param {TradeDecision} decision - The trade decision object.
+   * @returns {object} A structured payload object.
+   */
   buildTradePayload(decision: TradeDecision) {
     return {
       type: 'trade_proposal',
@@ -192,7 +279,14 @@ export class YahooWriteAdapter {
     };
   }
 
-  // Backward-compatible signature: allow applyTrade(leagueKey, decision) for tests/helpers
+  /**
+   * @method applyTrade
+   * @description Proposes a trade to another team in the league.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string | TradeDecision} myTeamKeyOrDecision - The team key of the proposer, or the trade decision object itself.
+   * @param {TradeDecision} [maybeDecision] - The trade decision object if the team key was provided as the second argument.
+   * @returns {Promise<{ success: boolean; id?: string }>} An object indicating success and the new transaction ID.
+   */
   async applyTrade(leagueKey: string, myTeamKeyOrDecision: string | TradeDecision, maybeDecision?: TradeDecision): Promise<{ success: boolean; id?: string }> {
     const myTeamKey = typeof myTeamKeyOrDecision === 'string' ? myTeamKeyOrDecision : '';
     const decision: TradeDecision = typeof myTeamKeyOrDecision === 'string' ? (maybeDecision as TradeDecision) : (myTeamKeyOrDecision as TradeDecision);
@@ -211,6 +305,14 @@ export class YahooWriteAdapter {
     }
   }
 
+  /**
+   * @method buildTradeResponseXML
+   * @description Builds the XML payload for responding to a trade offer.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} tradeId - The ID of the trade to respond to.
+   * @param {boolean} accept - Whether to accept or reject the trade.
+   * @returns {string} The XML payload string.
+   */
   buildTradeResponseXML(leagueKey: string, tradeId: string, accept: boolean): string {
     const action = accept ? 'accept' : 'reject';
     return `<fantasy_content><transaction>
@@ -221,6 +323,14 @@ export class YahooWriteAdapter {
     </transaction></fantasy_content>`;
   }
 
+  /**
+   * @method applyTradeResponse
+   * @description Submits a response (accept/reject) to an incoming trade offer.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} tradeId - The ID of the trade to respond to.
+   * @param {boolean} accept - `true` to accept the trade, `false` to reject.
+   * @returns {Promise<{ success: boolean }>} An object indicating whether the operation was successful.
+   */
   async applyTradeResponse(leagueKey: string, tradeId: string, accept: boolean): Promise<{ success: boolean }>{
     const xml = this.buildTradeResponseXML(leagueKey, tradeId, accept);
     this.dump('trade_response.xml', xml);
@@ -255,7 +365,15 @@ export class YahooWriteAdapter {
     }
   }
 
-  // ---------------- XML builders (best-effort payloads for iteration) ----------------
+  /**
+   * @private
+   * @method buildLineupXML
+   * @description Builds the XML payload for updating a team's lineup.
+   * @param {string} teamKey - The key of the team.
+   * @param {LineupAssignment[]} assignments - The lineup assignments.
+   * @param {number} [week] - The week to apply the lineup for.
+   * @returns {string} The XML payload.
+   */
   buildLineupXML(teamKey: string, assignments: LineupAssignment[], week?: number): string {
     const gameKey = (() => {
       const idx = teamKey.indexOf('.l.');
@@ -281,6 +399,15 @@ export class YahooWriteAdapter {
     return `<?xml version='1.0' encoding='UTF-8'?><fantasy_content><roster><coverage_type>week</coverage_type>${weekXml}<players>${players}</players></roster></fantasy_content>`;
   }
 
+  /**
+   * @private
+   * @method buildWaiverXML
+   * @description Builds the XML payload for submitting waiver claims.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} myTeamKey - The key of the team making the claims.
+   * @param {WaiverDecision} decision - The waiver decision object.
+   * @returns {string} The XML payload.
+   */
   buildWaiverXML(leagueKey: string, myTeamKey: string, decision: WaiverDecision): string {
     const gameKey = leagueKey.split('.l.')[0];
     const normalizePlayerKey = (pid: string): string => {
@@ -310,6 +437,15 @@ export class YahooWriteAdapter {
     return `<?xml version="1.0" encoding="UTF-8"?><fantasy_content${ns}><transaction><type>add</type><players>${items}</players></transaction></fantasy_content>`;
   }
 
+  /**
+   * @private
+   * @method buildPickupXML
+   * @description Builds the XML payload for immediate free agent pickups.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} myTeamKey - The key of the team making the pickups.
+   * @param {WaiverDecision} decision - The pickup decision object.
+   * @returns {string} The XML payload.
+   */
   buildPickupXML(leagueKey: string, myTeamKey: string, decision: WaiverDecision): string {
     const gameKey = leagueKey.split('.l.')[0];
     const normalizePlayerKey = (pid: string): string => {
@@ -443,6 +579,15 @@ export class YahooWriteAdapter {
     return `${days} day${days === 1 ? '' : 's'}`;
   }
 
+  /**
+   * @private
+   * @method buildTradeXML
+   * @description Builds the XML payload for proposing a trade.
+   * @param {string} leagueKey - The key of the league.
+   * @param {string} myTeamKey - The key of the team proposing the trade.
+   * @param {TradeDecision} decision - The trade decision object.
+   * @returns {string} The XML payload.
+   */
   buildTradeXML(leagueKey: string, myTeamKey: string, decision: TradeDecision): string {
     if (!decision.proposal) return '<fantasy_content />';
 

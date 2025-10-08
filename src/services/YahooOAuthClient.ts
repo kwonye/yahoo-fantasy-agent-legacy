@@ -1,19 +1,38 @@
+/**
+ * @fileoverview A client for handling the Yahoo Fantasy Sports OAuth2 flow.
+ */
 import axios, { AxiosInstance } from 'axios';
 import { URLSearchParams } from 'url';
 import { ConfigManager } from './ConfigManager';
 import { AuthToken, YahooCredentials } from '../models';
 
+/**
+ * @interface YahooOAuthOptions
+ * @description Options for configuring the YahooOAuthClient.
+ * @property {string} [authBaseUrl] - The base URL for the Yahoo authorization endpoint.
+ * @property {string} [tokenUrl] - The URL for the Yahoo token exchange endpoint.
+ */
 export interface YahooOAuthOptions {
   authBaseUrl?: string; // request_auth
   tokenUrl?: string; // get_token
 }
 
+/**
+ * @class YahooOAuthClient
+ * @description Manages the OAuth2 authentication process with the Yahoo Fantasy Sports API,
+ * including generating authorization URLs, exchanging codes for tokens, and refreshing tokens.
+ */
 export class YahooOAuthClient {
   private readonly tokenUrl: string;
   private readonly authBaseUrl: string;
   private readonly http: AxiosInstance;
   private readonly config: ConfigManager;
 
+  /**
+   * @constructor
+   * @param {ConfigManager} config - An instance of ConfigManager for storing and retrieving credentials and tokens.
+   * @param {YahooOAuthOptions} [opts={}] - Configuration options for the OAuth client.
+   */
   constructor(config: ConfigManager, opts: YahooOAuthOptions = {}) {
     this.config = config;
     this.tokenUrl = opts.tokenUrl ?? 'https://api.login.yahoo.com/oauth2/get_token';
@@ -21,6 +40,14 @@ export class YahooOAuthClient {
     this.http = axios.create();
   }
 
+  /**
+   * @method getAuthorizationUrl
+   * @description Generates the URL where the user should be redirected to authorize the application.
+   * @param {string} redirectUri - The URI where Yahoo will redirect the user back to after authorization.
+   * @param {string} state - An opaque value used to maintain state between the request and callback.
+   * @param {string} [scope='fspt-w'] - The scope of permissions to request. Defaults to 'fspt-w' (Fantasy Sports Write).
+   * @returns {string} The full authorization URL.
+   */
   getAuthorizationUrl(redirectUri: string, state: string, scope = (process.env.YAHOO_SCOPE || 'fspt-w')): string {
     const creds = this.getCreds();
     const params = new URLSearchParams({
@@ -34,6 +61,14 @@ export class YahooOAuthClient {
     return `${this.authBaseUrl}?${params.toString()}`;
   }
 
+  /**
+   * @method exchangeCodeForToken
+   * @description Exchanges an authorization code received from Yahoo for an access token and refresh token.
+   * @param {string} code - The authorization code from the redirect.
+   * @param {string} redirectUri - The same redirect URI that was used to get the authorization code.
+   * @returns {Promise<AuthToken>} The authentication token.
+   * @throws {Error} If the token exchange fails.
+   */
   async exchangeCodeForToken(code: string, redirectUri: string): Promise<AuthToken> {
     const creds = this.getCreds();
     const params = new URLSearchParams({
@@ -70,6 +105,12 @@ export class YahooOAuthClient {
     return token;
   }
 
+  /**
+   * @method getValidAccessToken
+   * @description Retrieves a valid access token, refreshing it if it has expired or is about to expire.
+   * @returns {Promise<string>} A valid access token.
+   * @throws {Error} If no refresh token is available to get a new access token.
+   */
   async getValidAccessToken(): Promise<string> {
     let token = this.config.loadYahooAuthToken();
     if (token && token.expiresAt.getTime() - Date.now() > 60_000) {
@@ -85,6 +126,13 @@ export class YahooOAuthClient {
     return token.accessToken;
   }
 
+  /**
+   * @method refreshAccessToken
+   * @description Uses a refresh token to obtain a new access token.
+   * @param {string} refreshToken - The refresh token to use.
+   * @returns {Promise<AuthToken>} The new, refreshed authentication token.
+   * @throws {Error} If the token refresh fails.
+   */
   async refreshAccessToken(refreshToken: string): Promise<AuthToken> {
     const creds = this.getCreds();
     const params = new URLSearchParams({
@@ -118,6 +166,15 @@ export class YahooOAuthClient {
     return token;
   }
 
+  /**
+   * @private
+   * @method mapTokenResponse
+   * @description Maps the raw response from the Yahoo token endpoint to a structured AuthToken object.
+   * @param {any} data - The raw response data.
+   * @param {string} [fallbackRefreshToken] - A fallback refresh token to use if the response doesn't contain one.
+   * @returns {AuthToken} The structured authentication token.
+   * @throws {Error} If the response is missing required fields.
+   */
   private mapTokenResponse(data: any, fallbackRefreshToken?: string): AuthToken {
     const accessToken: string = data.access_token;
     const refreshToken: string = data.refresh_token ?? fallbackRefreshToken ?? '';
@@ -128,6 +185,13 @@ export class YahooOAuthClient {
     return { accessToken, refreshToken, expiresAt };
   }
 
+  /**
+   * @private
+   * @method getCreds
+   * @description Retrieves the Yahoo client credentials from the secure store.
+   * @returns {YahooCredentials} The client credentials.
+   * @throws {Error} If the credentials are not configured.
+   */
   private getCreds(): YahooCredentials {
     // Only use credentials from secure store (set via dashboard)
     const loadStore = (): YahooCredentials | null => {

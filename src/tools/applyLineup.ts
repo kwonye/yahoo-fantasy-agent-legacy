@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Command-line tool for manually setting a Yahoo Fantasy Football lineup.
+ * This script allows a user to specify player-to-position assignments directly from the command line.
+ */
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -8,6 +12,15 @@ import { YahooOAuthClient } from '../services/YahooOAuthClient';
 import { YahooApiService } from '../services/YahooApiService';
 import { YahooWriteAdapter, LineupAssignment } from '../services/YahooWriteAdapter';
 
+/**
+ * @interface CliOptions
+ * @description Defines the command-line options available for the script.
+ * @property {number} [week] - The fantasy week to apply the lineup for.
+ * @property {string} [teamKey] - The Yahoo team key to apply the lineup to.
+ * @property {string} [leagueKey] - The Yahoo league key.
+ * @property {boolean} [dryRun] - If true, prints the XML payload without sending it.
+ * @property {boolean} [showRoster] - If true, displays the current roster before exiting.
+ */
 interface CliOptions {
   week?: number;
   teamKey?: string;
@@ -16,6 +29,10 @@ interface CliOptions {
   showRoster?: boolean;
 }
 
+/**
+ * @function printUsage
+ * @description Prints the command-line usage instructions to the console.
+ */
 function printUsage() {
   const script = path.basename(__filename);
   console.log(`Manual lineup writer
@@ -35,6 +52,12 @@ Examples:
 `);
 }
 
+/**
+ * @function parseArgs
+ * @description Parses command-line arguments into structured assignments and options.
+ * @param {string[]} argv - The array of command-line arguments.
+ * @returns {{ assignments: LineupAssignment[]; options: CliOptions }} The parsed assignments and options.
+ */
 function parseArgs(argv: string[]): { assignments: LineupAssignment[]; options: CliOptions } {
   const assignments: LineupAssignment[] = [];
   const options: CliOptions = {};
@@ -83,6 +106,11 @@ function parseArgs(argv: string[]): { assignments: LineupAssignment[]; options: 
   return { assignments, options };
 }
 
+/**
+ * @function main
+ * @description The main execution function for the script. It parses arguments,
+ * initializes API clients, and applies the specified lineup changes.
+ */
 async function main() {
   const { assignments, options } = parseArgs(process.argv.slice(2));
 
