@@ -741,6 +741,16 @@ export class BotController {
       for (const offer of offers) {
         if (remaining <= 0) { this.audit.recordAction('trades_incoming_budget_exhausted'); break; }
         const tradeId = String(offer.id || '');
+
+        const involvesMyTeam = (offer.moves || []).some(
+          (move: any) => move.destination === this.canonicalTeamKey
+        );
+
+        if (!involvesMyTeam) {
+          this.audit.recordAction('trade_incoming_skipped_irrelevant', { tradeId });
+          continue;
+        }
+
         let accept = false;
         try {
           if (offer.moves && offer.moves.length > 0) {

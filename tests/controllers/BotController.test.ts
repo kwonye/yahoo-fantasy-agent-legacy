@@ -9,7 +9,7 @@ describe('BotController', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    process.env = { ...originalEnv, GEMINI_API_KEY: 'key', YAHOO_CLIENT_ID: 'id', YAHOO_CLIENT_SECRET: 'secret' };
+    process.env = { ...originalEnv, GEMINI_API_KEY: 'key', YAHOO_CLIENT_ID: 'id', YAHOO_CLIENT_SECRET: 'secret', CONFIG_ENCRYPTION_KEY: 'test-key' };
   });
 
   it('runs daily and records decisions with mocks', async () => {
@@ -22,7 +22,12 @@ describe('BotController', () => {
       teams: [],
     });
     // @ts-ignore
-    bc['yahoo'].getTeamRoster = jest.fn().mockResolvedValue([]);
+    bc['yahoo'].getTeamRoster = jest.fn().mockResolvedValue([{ player: { id: 'p1', name: 'My Player' } }]);
+    // @ts-ignore
+    bc['yahoo'].getTeamRosterWithSlots = jest.fn().mockImplementation((teamKey) => {
+      if (teamKey.endsWith('t.1')) return Promise.resolve([{ player: { id: 'p1', name: 'My Player' } }]);
+      return Promise.resolve([{ player: { id: 'p2', name: 'Their Player' } }]);
+    });
     // @ts-ignore
     bc['yahoo'].getWaiverWirePlayers = jest.fn().mockResolvedValue([]);
     // @ts-ignore
@@ -31,15 +36,29 @@ describe('BotController', () => {
     bc['yahoo'].submitWaiverClaims = jest.fn().mockResolvedValue({ success: true });
     // @ts-ignore
     bc['yahoo'].proposeTrade = jest.fn().mockResolvedValue({ success: true, id: 'trade-1' });
+    // @ts-ignore
+    bc['yahoo'].getPendingTrades = jest.fn().mockResolvedValue([]);
+    // @ts-ignore
+    bc['yahoo'].getLeagueTeams = jest.fn().mockResolvedValue([{ key: 'nfl.l.1.t.2', name: 'Opponent' }]);
+    // @ts-ignore
+    bc['yahoo'].getAllTransactionsNormalized = jest.fn().mockResolvedValue([]);
+    // @ts-ignore
+    bc['yahoo'].getTeamInfo = jest.fn().mockResolvedValue({ id: 'nfl.l.1.t.1', faabBalance: 100 });
 
     // @ts-ignore
-    bc['decisions'].decideLineup = jest.fn().mockResolvedValue({
-      recommendedLineup: { starters: {}, bench: [] }, changes: [], confidence: 0.9, reasoning: 'OK', projectedPoints: 100,
-    });
-    // @ts-ignore
-    bc['decisions'].decideWaivers = jest.fn().mockResolvedValue({ claims: [], reasoning: 'none', confidence: 1, expectedValue: 0 });
-    // @ts-ignore
-    bc['decisions'].decideTrade = jest.fn().mockResolvedValue({ shouldTrade: false, reasoning: 'no', confidence: 1, expectedValue: 0 });
+    bc['decisions'] = {
+      decideLineup: jest.fn().mockResolvedValue({
+        recommendedLineup: { starters: {}, bench: [] }, changes: [], confidence: 0.9, reasoning: 'OK', projectedPoints: 100,
+      }),
+      decideWaivers: jest.fn().mockResolvedValue({ claims: [], reasoning: 'none', confidence: 1, expectedValue: 0 }),
+      decideTradeMulti: jest.fn().mockResolvedValue({
+        shouldTrade: true,
+        proposal: { myPlayers: ['p1'], theirPlayers: ['p2'], targetTeamId: 'nfl.l.1.t.2' },
+        reasoning: 'test trade',
+        confidence: 1,
+        expectedValue: 1
+      }),
+    };
 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-'));
     // @ts-ignore
