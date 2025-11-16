@@ -1,27 +1,70 @@
-version: "3.9"
+# Example docker-compose for Yahoo Fantasy Agent
+#
+# Quick start
+# 1) Copy .env.example to .env and fill in values (at minimum: CONFIG_ENCRYPTION_KEY, GEMINI_API_KEY)
+# 2) Ensure you have TLS certs at config/certs/cert.pem and config/certs/key.pem (or use start-https.sh locally)
+# 3) Copy this file to docker-compose.yml and run:
+#      docker compose up --build
+#
+# Notes
+# - The container runs HTTPS on port 3000; the compose publishes 3000 -> 3000
+# - Credentials and runtime state are persisted via the mounted ./.secure, ./config and ./logs folders
+# - Live writes are controlled via the dashboard toggle “Apply Changes”
 
 services:
-  yahoo-fantasy-agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: yahoo-fantasy-agent:latest
+  web:
+    build: .
     container_name: yahoo-fantasy-agent
+    working_dir: /app
+    # Mount source for live editing; persist secure store, config and logs
+    volumes:
+      - ./:/app
+      - ./.secure:/app/.secure
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - /home/pi/.config/gh:/root/.config/gh
     env_file:
       - .env
     environment:
+      # Enable HTTPS inside the container; point to mounted certs
       ENABLE_HTTPS: "1"
       HTTPS_PORT: "3000"
+      # Certificates will be generated at /app/config/certs if missing
+      # Live writes to Yahoo are controlled via dashboard (“Apply Changes”)
+      # Default port if HTTPS disabled
       PORT: "3000"
+      # Optional debug
+      DEBUG_YAHOO: "1"
     ports:
       - "3000:3000"
-    volumes:
-      - ./config:/app/config
-      - ./logs:/app/logs
-      - ./.secure:/app/.secure
-    restart: unless-stopped
+
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health" ]
       interval: 20s
       timeout: 5s
       retries: 6
+    restart: "no"
+
+# Optionally, a dev service with live reload (uncomment to use)
+#  dev:
+#    image: node:20-alpine
+#    working_dir: /app
+#    volumes:
+#      - ./:/app
+#      - ./.secure:/app/.secure
+#      - ./config:/app/config
+#      - ./logs:/app/logs
+#    env_file:
+#      - .env
+#    environment:
+#      ENABLE_HTTPS: "1"
+#      HTTPS_PORT: "3000"
+#      # Certificates will be generated at /app/config/certs if missing
+#      YAHOO_XML_WRITE: "1"
+#      PORT: "3000"
+#      DEBUG_YAHOO: "1"
+#    ports:
+#      - "3000:3000"
+#    command: >
+#      sh -lc "npm ci && npm run web:dev"
+#    restart: unless-stopped

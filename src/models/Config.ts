@@ -43,6 +43,7 @@ export interface YahooCredentials {
 export interface GeminiCredentials {
   apiKey: string;
   model?: string;
+  geminiQuota?: number;
 }
 
 export interface AuthToken {

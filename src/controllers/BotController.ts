@@ -46,6 +46,8 @@ export class BotController {
     timestamp: number;
   } | null = null;
 
+  private evaluatedTradeIds: Set<string> = new Set();
+
   constructor(opts: BotControllerOptions) {
     const cfgMgr = new ConfigManager();
     const oauth = new YahooOAuthClient(cfgMgr);
@@ -72,7 +74,7 @@ export class BotController {
     this.decisions = decisions;
     this.leagueKey = opts.leagueKey;
     this.teamKey = opts.teamKey;
-    this.quota = new GeminiQuota();
+    this.quota = GeminiQuota.getInstance();
     this.canonicalLeagueKey = opts.leagueKey;
     this.canonicalTeamKey = opts.teamKey;
     this.canonicalKeysResolved = this.isCanonicalKey(this.canonicalLeagueKey, 'league') && this.isCanonicalKey(this.canonicalTeamKey, 'team');
@@ -739,12 +741,17 @@ export class BotController {
       // Limit number of offers evaluated by remaining budget
       let remaining = this.quota.getRemaining();
       for (const offer of offers) {
+        if (this.evaluatedTradeIds.has(offer.id)) {
+          continue;
+        }
+
         if (remaining <= 0) { this.audit.recordAction('trades_incoming_budget_exhausted'); break; }
         const tradeId = String(offer.id || '');
         let accept = false;
         try {
           if (offer.moves && offer.moves.length > 0) {
             const decision = await gemini.evaluateIncomingTradeOffer(myRoster, league.settings, needs, surplus, offer.moves, this.teamKey, leagueProfile);
+            this.evaluatedTradeIds.add(offer.id);
             accept = !!decision.shouldAccept && (decision.confidence ?? 0) >= 0.6;
             this.audit.recordAction('trade_incoming_eval', { tradeId, accept, confidence: decision.confidence, reasoning: decision.reasoning });
             remaining = this.quota.getRemaining(); // update after a call

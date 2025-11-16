@@ -709,6 +709,17 @@
             });
           }
           
+          // Add trade evaluation task
+          if (j.tradeEval && j.tradeEval.enabled) {
+            const tradeEvalTime = new Date(j.tradeEval.nextRunISO);
+            tasks.push({
+              type: 'Trade Evaluation',
+              time: tradeEvalTime,
+              details: `Daily trade evaluation at ${tradeEvalTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`,
+              sortTime: tradeEvalTime.getTime()
+            });
+          }
+
           // Sort by earliest time first
           tasks.sort((a, b) => a.sortTime - b.sortTime);
           

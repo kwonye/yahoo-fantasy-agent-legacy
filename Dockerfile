@@ -37,8 +37,13 @@ COPY package*.json ./
 # Default ports (using HTTPS if enabled via env)
 EXPOSE 3000
 
-# Install openssl for self-signed cert generation in entrypoint
-RUN apk add --no-cache openssl
+# Install openssl and git
+RUN apk add --no-cache openssl git curl && \
+    curl -sSL https://github.com/cli/cli/releases/download/v2.50.0/gh_2.50.0_linux_arm64.tar.gz -o gh.tar.gz && \
+    tar -xvf gh.tar.gz && \
+    mv gh_2.50.0_linux_arm64/bin/gh /usr/local/bin/ && \
+    rm -rf gh.tar.gz gh_2.50.0_linux_arm64 && \
+    git config --global --add safe.directory /app
 
 # Entrypoint to generate self-signed certs if needed
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh

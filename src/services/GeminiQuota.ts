@@ -1,18 +1,29 @@
 import fs from 'fs';
 import path from 'path';
+import { ConfigManager } from './ConfigManager';
 
 export class GeminiQuota {
+  private static instance: GeminiQuota;
   private readonly filePath: string;
   private readonly limit: number;
 
-  constructor(limit?: number, filePath?: string) {
+  private constructor(limit?: number, filePath?: string) {
     const logsDir = path.join(process.cwd(), 'logs');
     if (!fs.existsSync(logsDir)) {
       try { fs.mkdirSync(logsDir, { recursive: true }); } catch {}
     }
     this.filePath = filePath ?? path.join(logsDir, 'gemini_quota.json');
+    const configManager = new ConfigManager();
+    const geminiCreds = configManager.loadGeminiCredentials();
     const envLimit = parseInt(process.env.MAX_GEMINI_CALLS_PER_DAY || '', 10);
-    this.limit = Number.isFinite(envLimit) && envLimit > 0 ? envLimit : (limit ?? 50);
+    this.limit = geminiCreds?.geminiQuota ?? (Number.isFinite(envLimit) && envLimit > 0 ? envLimit : (limit ?? 200));
+  }
+
+  public static getInstance(): GeminiQuota {
+    if (!GeminiQuota.instance) {
+      GeminiQuota.instance = new GeminiQuota();
+    }
+    return GeminiQuota.instance;
   }
 
   private todayKey(): string {
@@ -43,6 +54,10 @@ export class GeminiQuota {
     try {
       fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf8');
     } catch {}
+  }
+
+  reset() {
+    this.write({ date: this.todayKey(), count: 0 });
   }
 
   getLimit(): number { return this.limit; }

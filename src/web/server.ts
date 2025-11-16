@@ -323,14 +323,19 @@ app.get('/api/stream', (req, res) => {
 });
 
 
+const { DailyScheduler } = require('../services/DailyScheduler');
+const { GeminiQuota } = require('../services/GeminiQuota');
+const dailyScheduler = new DailyScheduler(() => {
+  GeminiQuota.getInstance().reset();
+}, { hour: 0, minute: 0 });
+dailyScheduler.start();
+
 // Gemini quota status
 app.get('/api/quota', (_req, res) => {
   try {
-    const { GeminiQuota } = require('../services/GeminiQuota');
-    const q = new GeminiQuota();
     // Read internals by getting remaining and limit; date is implied by file contents
-    const remaining = q.getRemaining();
-    const limit = q.getLimit();
+    const remaining = GeminiQuota.getInstance().getRemaining();
+    const limit = GeminiQuota.getInstance().getLimit();
     res.json({ ok: true, limit, remaining, date: new Date().toISOString().slice(0,10) });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
@@ -1889,6 +1894,19 @@ app.post('/api/features', (req, res) => {
   }
 });
 
+app.post('/api/update-deploy', (req, res) => {
+  const { exec } = require('child_process');
+  const scriptPath = path.join(process.cwd(), 'scripts', 'update_deploy.sh');
+
+  exec(`sh ${scriptPath}`, (error: any, stdout: any, stderr: any) => {
+    if (error) {
+      console.error(`exec error: ${error}`);
+      return res.status(500).json({ ok: false, error: stderr });
+    }
+    return res.json({ ok: true, output: stdout });
+  });
+});
+
 // Deployment update endpoint - pulls latest code and restarts Docker containers
 app.post('/api/deploy/update', async (req, res) => {
   try {
@@ -1915,7 +1933,7 @@ app.post('/api/deploy/update', async (req, res) => {
     }
     
     console.log('[Deploy Update] Restarting Docker containers...');
-    const upResult = await execAsync('docker compose up -d');
+    const upResult = await execAsync('docker compose up -d --build');
     console.log('[Deploy Update] Docker up output:', upResult.stdout);
     if (upResult.stderr) {
       console.warn('[Deploy Update] Docker up warnings:', upResult.stderr);

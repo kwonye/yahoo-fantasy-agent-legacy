@@ -143,7 +143,8 @@ export default function AppPage({ initialQuota }: AppPageProps) {
   const [yahooClientId, setYahooClientId] = useState('');
   const [yahooClientSecret, setYahooClientSecret] = useState('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [geminiModel, setGeminiModel] = useState('gemini-2.5-pro');
+  const [geminiModel, setGeminiModel] = useState('gemini-1.5-pro');
+  const [geminiQuota, setGeminiQuota] = useState(200);
   const [leagueKeyInput, setLeagueKeyInput] = useState('');
   const [teamKeyInput, setTeamKeyInput] = useState('');
   const [redirectUriInput, setRedirectUriInput] = useState('');
@@ -153,6 +154,7 @@ export default function AppPage({ initialQuota }: AppPageProps) {
   const [yahooSecretTouched, setYahooSecretTouched] = useState(false);
   const [geminiKeyTouched, setGeminiKeyTouched] = useState(false);
   const [geminiModelTouched, setGeminiModelTouched] = useState(false);
+  const [geminiQuotaTouched, setGeminiQuotaTouched] = useState(false);
   const [leagueKeyTouched, setLeagueKeyTouched] = useState(false);
   const [teamKeyTouched, setTeamKeyTouched] = useState(false);
   const [redirectTouched, setRedirectTouched] = useState(false);
@@ -379,7 +381,8 @@ export default function AppPage({ initialQuota }: AppPageProps) {
       }
       if (map.geminiRaw?.ok) {
         if (!geminiKeyTouched) setGeminiApiKey(map.geminiRaw.apiKey || '');
-        if (!geminiModelTouched) setGeminiModel(map.geminiRaw.model || 'gemini-2.5-pro');
+        if (!geminiModelTouched) setGeminiModel(map.geminiRaw.model || 'gemini-1.5-pro');
+        if (!geminiQuotaTouched) setGeminiQuota(map.geminiRaw.geminiQuota || 200);
       }
 
       if (typeof window !== 'undefined') {
@@ -403,7 +406,7 @@ export default function AppPage({ initialQuota }: AppPageProps) {
     } finally {
       setIsRefreshing(false);
     }
-  }, [geminiKeyTouched, geminiModelTouched, leagueKeyTouched, teamKeyTouched, yahooClientTouched, yahooSecretTouched]);
+  }, [geminiKeyTouched, geminiModelTouched, geminiQuotaTouched, leagueKeyTouched, teamKeyTouched, yahooClientTouched, yahooSecretTouched]);
 
   useEffect(() => {
     refreshAll();
@@ -426,17 +429,18 @@ export default function AppPage({ initialQuota }: AppPageProps) {
 
   const handleSaveGemini = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const body = { apiKey: geminiApiKey, model: geminiModel };
+    const body = { apiKey: geminiApiKey, model: geminiModel, geminiQuota: geminiQuota };
     const result = await fetchJson('/api/creds/gemini', { method: 'POST', body: JSON.stringify(body) });
     if ((result as any)?.ok) {
       alert('Gemini settings saved');
       setGeminiKeyTouched(false);
       setGeminiModelTouched(false);
+      setGeminiQuotaTouched(false);
       refreshAll();
     } else {
       alert(`Save failed: ${(result as any)?.error || 'unknown'}`);
     }
-  }, [geminiApiKey, geminiModel, refreshAll]);
+  }, [geminiApiKey, geminiModel, geminiQuota, refreshAll]);
 
   const handleSaveKeys = useCallback(async () => {
     const body = { leagueKey: leagueKeyInput, teamKey: teamKeyInput, redirectUri: redirectUriInput };
@@ -578,6 +582,15 @@ export default function AppPage({ initialQuota }: AppPageProps) {
     }
   }, [leagueTeamDisplay, theirTeamNumber]);
 
+  const handleUpdateDeploy = useCallback(async () => {
+    const result = await fetchJson('/api/update-deploy', { method: 'POST' });
+    if ((result as any)?.ok) {
+      alert('Deployment initiated!');
+    } else {
+      alert(`Deployment failed: ${(result as any)?.error || 'unknown'}`);
+    }
+  }, []);
+
   const modeBadgeText = features.applyChanges ? 'Mode: Live Writes' : 'Mode: Dry Run';
   const modeBadgeClass = features.applyChanges ? 'badge bg-danger' : 'badge bg-secondary';
   const yahooBadgeClass = credentials?.yahoo ? 'badge bg-success' : 'badge bg-warning text-dark';
@@ -651,9 +664,13 @@ export default function AppPage({ initialQuota }: AppPageProps) {
                         <label className="form-label">Gemini API Key</label>
                         <input value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); setGeminiKeyTouched(true); }} className="form-control form-control-sm" type="password" />
                       </div>
-                      <div className="mb-3">
+                      <div className="mb-2">
                         <label className="form-label">Gemini Model</label>
                         <input value={geminiModel} onChange={(e) => { setGeminiModel(e.target.value); setGeminiModelTouched(true); }} className="form-control form-control-sm" />
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label">Gemini Quota</label>
+                        <input value={geminiQuota} onChange={(e) => { setGeminiQuota(Number(e.target.value)); setGeminiQuotaTouched(true); }} className="form-control form-control-sm" type="number" />
                       </div>
                       <button type="submit" className="btn btn-sm btn-secondary">Save Gemini Settings</button>
                     </form>
@@ -765,6 +782,7 @@ export default function AppPage({ initialQuota }: AppPageProps) {
                       <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/bot/pickups', 'Pickups')} type="button">Run Pickups</button>
                       <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/run/trades/evaluate', 'Trade evaluation')} type="button">Evaluate Trades</button>
                       <button className="btn btn-sm btn-outline-primary" onClick={() => handleRun('/api/run/trades/respond', 'Trade responses')} type="button">Respond to Trades</button>
+                      <button className="btn btn-sm btn-outline-warning" onClick={() => handleUpdateDeploy()} type="button">Update & Deploy</button>
                     </div>
                   </DashboardCard>
                 </div>

@@ -36,7 +36,7 @@ export class GeminiClient {
       try { const cm = new ConfigManager(); const creds = cm.loadGeminiCredentials(); model = creds?.model; } catch {}
     }
     this.model = model || 'gemini-2.5-flash';
-    this.quota = new GeminiQuota();
+    this.quota = GeminiQuota.getInstance();
     this.genAI = new GoogleGenAI({
       apiKey: this.apiKey,
     });
