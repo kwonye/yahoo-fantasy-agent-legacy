@@ -23,7 +23,7 @@ async function ensureAuth(oauth: YahooOAuthClient, mgr: ConfigManager) {
     console.log('Yahoo auth required. Two options:');
     console.log('1) Start the web dashboard (npm run web), then click "Connect Yahoo".');
     console.log('   Redirect URI should be registered as:', redirectUri);
-    console.log(`   Dashboard URL: https://localhost:${process.env.PORT || 3000}/auth/yahoo/start`);
+    console.log(`   Dashboard URL: http://localhost:${process.env.PORT || 3000}/auth/yahoo/start`);
     console.log('');
     console.log('2) Manual flow (advanced): open this URL and complete consent,');
     console.log('   then copy the code from the redirect URL and exchange via a one-off script:');

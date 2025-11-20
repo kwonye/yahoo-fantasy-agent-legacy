@@ -76,7 +76,7 @@ function configureIncomingTradeWatcher(app: AppSettings): void {
       clearInterval(incomingTradeWatcher);
       incomingTradeWatcher = null;
     }
-  } catch {}
+  } catch { }
   if (!app.tradeResponsesAutomationEnabled) return;
   const lk = app.leagueKey || '';
   const tk = app.teamKey || '';
@@ -110,8 +110,8 @@ function configureTradeEvaluationScheduler(app: AppSettings): void {
       tradeEvalScheduler.stop();
       tradeEvalScheduler = null;
     }
-  } catch {}
-  try { (global as any).__tradeEval = null; } catch {}
+  } catch { }
+  try { (global as any).__tradeEval = null; } catch { }
   if (!app.tradesAutomationEnabled) return;
   const lk = app.leagueKey || '';
   const tk = app.teamKey || '';
@@ -125,7 +125,7 @@ function configureTradeEvaluationScheduler(app: AppSettings): void {
   };
   tradeEvalScheduler = new Scheduler(task, { hour, minute, runOnStart: false });
   tradeEvalScheduler.start();
-  try { (global as any).__tradeEval = tradeEvalScheduler; } catch {}
+  try { (global as any).__tradeEval = tradeEvalScheduler; } catch { }
   console.log(`Trade evaluation scheduler enabled (daily at ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}).`);
 }
 
@@ -151,7 +151,7 @@ function computeRedirectUri(req: express.Request, overridePath?: '/auth/callback
         u.pathname = overridePath;
         u.search = '';
         return u.toString();
-      } catch {}
+      } catch { }
     }
     return env;
   }
@@ -181,13 +181,13 @@ app.get('/auth/yahoo/start', (req, res) => {
         res.status(400).send('Yahoo client credentials are not configured. Save them in the dashboard first.');
         return;
       }
-      console.log('[OAuth-start] clientId=%s redirect_uri=%s scope=%s', clientId.slice(0,3) + '***', redirectUri, scope);
+      console.log('[OAuth-start] clientId=%s redirect_uri=%s scope=%s', clientId.slice(0, 3) + '***', redirectUri, scope);
       if (String(process.env.DEBUG_OAUTH || '0') === '1') {
         console.log('[OAuth-start-url]', url);
       }
-    } catch {}
+    } catch { }
     // Optionally set state cookie for CSRF (not validated yet)
-    try { res.cookie?.('oauth_state', state, { httpOnly: true, sameSite: 'lax' } as any); } catch {}
+    try { res.cookie?.('oauth_state', state, { httpOnly: true, sameSite: 'lax' } as any); } catch { }
     res.redirect(url);
   } catch (e) {
     res.status(500).send('OAuth start failed: ' + (e as Error).message);
@@ -209,7 +209,7 @@ async function handleYahooCallback(req: express.Request, res: express.Response) 
   try {
     const cm = new ConfigManager();
     const oauth = new YahooOAuthClient(cm);
-    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const proto = 'https'; // Force HTTPS for callback URI matching
     const host = req.headers.host || `localhost:${defaultPort}`;
     const redirectFromReq = `${proto}://${host}${req.path}`;
     const debug = String(process.env.DEBUG_OAUTH || '0') === '1';
@@ -258,7 +258,7 @@ function extractCodeAndRedirect(fromUrl: string): { code?: string; redirectUri?:
           const base = new URL(fromUrl.slice(0, q));
           const redirectUri = `${base.protocol}//${base.host}${base.pathname}`;
           return { code, redirectUri };
-        } catch {}
+        } catch { }
       }
       return { code };
     }
@@ -298,8 +298,8 @@ app.get('/api/oauth/info', (req, res) => {
     const cm = new ConfigManager();
     const redirectUri = computeRedirectUri(req);
     let clientId = '';
-    try { clientId = String((cm.loadYahooCredentials() as any)?.clientId || ''); } catch {}
-    res.json({ ok: true, redirectUri, clientIdMasked: clientId ? (clientId.slice(0,3) + '***' + clientId.slice(-2)) : '' });
+    try { clientId = String((cm.loadYahooCredentials() as any)?.clientId || ''); } catch { }
+    res.json({ ok: true, redirectUri, clientIdMasked: clientId ? (clientId.slice(0, 3) + '***' + clientId.slice(-2)) : '' });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
@@ -314,7 +314,7 @@ app.get('/api/stream', (req, res) => {
   res.write(': connected\n\n');
   sseClients.add(res);
   const heartbeat = setInterval(() => {
-    try { res.write(': ping\n\n'); } catch {}
+    try { res.write(': ping\n\n'); } catch { }
   }, 15000);
   req.on('close', () => {
     clearInterval(heartbeat);
@@ -337,7 +337,7 @@ app.get('/api/quota', (_req, res) => {
     // Read internals by getting remaining and limit; date is implied by file contents
     const remaining = GeminiQuota.getInstance().getRemaining();
     const limit = GeminiQuota.getInstance().getLimit();
-    res.json({ ok: true, limit, remaining, date: new Date().toISOString().slice(0,10) });
+    res.json({ ok: true, limit, remaining, date: new Date().toISOString().slice(0, 10) });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
@@ -364,14 +364,14 @@ app.get('/api/schedule/preview', (_req, res) => {
           const lp: any = cm.loadLeagueProfile();
           const wt = lp?.meta?.waiverTime as string | undefined;
           if (wt && typeof wt === 'string') {
-            const days = ['sun','mon','tue','wed','thu','fri','sat'];
+            const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
             const lower = wt.toLowerCase();
             let d = days.findIndex((x) => lower.includes(x)); if (d < 0) d = 2;
             const tm = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
             let h = 7, m = 0; if (tm) { h = parseInt(String(tm[1]), 10); m = tm[2] ? parseInt(String(tm[2]), 10) : 0; const ap = tm[3]; if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; }
             day = d; hour = h; minute = m; source = 'league_profile';
           }
-        } catch {}
+        } catch { }
       }
       const next = (() => { const now = new Date(); const d = new Date(now); const delta = (day - d.getDay() + 7) % 7; d.setDate(d.getDate() + delta); d.setHours(hour, minute, 0, 0); if (d <= now) d.setDate(d.getDate() + 7); return d; })();
       waiver = { enabled: true, day, hour, minute, nextRunISO: next.toISOString(), source };
@@ -401,9 +401,9 @@ app.get('/api/schedule/preview', (_req, res) => {
       };
       const windowsEt = [
         { dow: 4, hh: 20, mm: 15 }, // Thu 8:15 PM ET
-        { dow: 0, hh: 9,  mm: 30 }, // Sun 9:30 AM ET (international weeks only)
-        { dow: 0, hh: 13, mm: 0  }, // Sun 1:00 PM ET
-        { dow: 0, hh: 16, mm: 5  }, // Sun 4:05 PM ET
+        { dow: 0, hh: 9, mm: 30 }, // Sun 9:30 AM ET (international weeks only)
+        { dow: 0, hh: 13, mm: 0 }, // Sun 1:00 PM ET
+        { dow: 0, hh: 16, mm: 5 }, // Sun 4:05 PM ET
         { dow: 0, hh: 16, mm: 25 }, // Sun 4:25 PM ET
         { dow: 0, hh: 20, mm: 20 }, // Sun 8:20 PM ET
         { dow: 1, hh: 20, mm: 15 }, // Mon 8:15 PM ET
@@ -451,14 +451,16 @@ app.get('/api/creds', (_req, res) => {
     let yahoo: any = null;
     let gemini: any = null;
     let source: 'store' | null = null;
-    try { yahoo = cm.loadYahooCredentials(); } catch {}
-    try { gemini = cm.loadGeminiCredentials(); } catch {}
+    try { yahoo = cm.loadYahooCredentials(); } catch { }
+    try { gemini = cm.loadGeminiCredentials(); } catch { }
     if (yahoo) source = 'store';
     // Do not fallback to environment for Gemini API key; require saving via dashboard
-    const responseData = { ok: true, creds: {
-      yahoo: yahoo ? { clientId: mask(yahoo.clientId), hasRefresh: !!yahoo.refreshToken, source } : null,
-      gemini: gemini ? { apiKey: mask(gemini.apiKey), model: (gemini as any).model || 'gemini-2.5-flash' } : null,
-    }};
+    const responseData = {
+      ok: true, creds: {
+        yahoo: yahoo ? { clientId: mask(yahoo.clientId), hasRefresh: !!yahoo.refreshToken, source } : null,
+        gemini: gemini ? { apiKey: mask(gemini.apiKey), model: (gemini as any).model || 'gemini-2.5-flash' } : null,
+      }
+    };
     console.log('[/api/creds] Sending response:', responseData);
     res.json(responseData);
   } catch (e) {
@@ -480,7 +482,7 @@ app.post('/api/creds/yahoo', (req, res) => {
     };
     // If clientId changes, clear any stored OAuth token to avoid mismatch
     if (existing && existing.clientId && String(existing.clientId) !== next.clientId) {
-      try { cm.deleteYahooAuthToken(); } catch {}
+      try { cm.deleteYahooAuthToken(); } catch { }
     }
     cm.saveYahooCredentials(next);
     res.json({ ok: true });
@@ -505,7 +507,7 @@ app.post('/api/creds/gemini', (req, res) => {
 // Return raw Gemini credentials (unmasked) for local display in the dashboard
 app.get('/api/creds/gemini/raw', (_req, res) => {
   try {
-    try { res.setHeader('Cache-Control', 'no-store'); } catch {}
+    try { res.setHeader('Cache-Control', 'no-store'); } catch { }
     const cm = new ConfigManager();
     const c = cm.loadGeminiCredentials();
     if (!c) { res.json({ ok: false, error: 'No Gemini credentials saved' }); return; }
@@ -519,7 +521,7 @@ app.get('/api/creds/gemini/raw', (_req, res) => {
 // Note: Intended for local use; avoid exposing broadly.
 app.get('/api/creds/yahoo/raw', (_req, res) => {
   try {
-    try { res.setHeader('Cache-Control', 'no-store'); } catch {}
+    try { res.setHeader('Cache-Control', 'no-store'); } catch { }
     const cm = new ConfigManager();
     const c = cm.loadYahooCredentials();
     if (!c) { res.json({ ok: false, error: 'No Yahoo credentials saved' }); return; }
@@ -605,8 +607,8 @@ app.get('/api/league-config', (_req, res) => {
           if (files.length === 0) return null;
           const preferredOrder = (name: string) =>
             name === 'league_setting.json' ? 0 :
-            name.toLowerCase().includes('league') ? 1 :
-            2;
+              name.toLowerCase().includes('league') ? 1 :
+                2;
           files.sort((a: string, b: string) => preferredOrder(a) - preferredOrder(b));
           const chosen = files[0];
           if (!chosen) return null;
@@ -615,7 +617,7 @@ app.get('/api/league-config', (_req, res) => {
           const obj = JSON.parse(raw);
           // Normalize to canonical path for future
           const target = pathMod.join(dir, 'league_setting.json');
-          try { fsMod.writeFileSync(target, JSON.stringify(obj, null, 2), 'utf8'); } catch {}
+          try { fsMod.writeFileSync(target, JSON.stringify(obj, null, 2), 'utf8'); } catch { }
           return obj;
         };
         // Try cwd/config, then walk up to find a config dir
@@ -630,7 +632,7 @@ app.get('/api/league-config', (_req, res) => {
             p = next;
           }
         }
-      } catch {}
+      } catch { }
     }
     res.json({ ok: true, profile: profile ?? null });
   } catch (e) {
@@ -683,7 +685,7 @@ app.post('/api/gemini/test', async (req, res) => {
     // Ensure API key present and a prompt provided
     const cm = new ConfigManager();
     let hasKey = false;
-    try { const g = cm.loadGeminiCredentials(); hasKey = !!g?.apiKey; } catch {}
+    try { const g = cm.loadGeminiCredentials(); hasKey = !!g?.apiKey; } catch { }
     if (!hasKey) { res.status(400).json({ ok: false, error: 'Gemini API key missing (save it in the dashboard).' }); return; }
     if (!prompt) { res.status(400).json({ ok: false, error: 'Prompt is required' }); return; }
     const client = new GeminiClient();
@@ -789,7 +791,7 @@ app.get('/api/trades/incoming', async (req, res) => {
         ids: trades.map((t: any) => t.id),
       });
       fs.appendFileSync(path.join(dir, 'trades_debug.log'), line + '\n', 'utf8');
-    } catch {}
+    } catch { }
     res.json({ ok: true, trades, teamKeyUsed: teamKey || null, debug: debug ? { tried: dbg.tried } : undefined });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
@@ -844,7 +846,7 @@ app.post('/api/trades/evaluate', async (req, res) => {
       const ns = await gemini.analyzeRosterBalance(myRoster, league.settings);
       needs = Array.isArray(ns.needs) ? ns.needs : [];
       surplus = Array.isArray(ns.surplus) ? ns.surplus : [];
-    } catch {}
+    } catch { }
     const decision = await gemini.evaluateIncomingTradeOffer(myRoster, league.settings, needs, surplus, tx.moves, String(teamKey), leagueProfile);
     res.json({ ok: true, tradeId, decision, needs, surplus });
   } catch (e) {
@@ -912,7 +914,7 @@ app.post('/api/trades/apply', async (req, res) => {
     const myRoster = myEntries.map((e) => e.player);
     // Gather opponent teams
     let opponentTeams: Array<{ key: string; name?: string }> = [];
-    try { opponentTeams = await api.getLeagueTeams(leagueKey); } catch {}
+    try { opponentTeams = await api.getLeagueTeams(leagueKey); } catch { }
     const myKeySuffix = (() => { const idx = String(teamKey).lastIndexOf('.t.'); return idx > 0 ? String(teamKey).slice(idx + 3) : ''; })();
     const isMe = (k: string) => k === teamKey || (myKeySuffix && String(k).endsWith('.t.' + myKeySuffix));
     const candidates = (opponentTeams || []).filter((t) => t?.key && !isMe(String(t.key)));
@@ -1027,7 +1029,7 @@ app.post('/api/pickups/apply', async (req, res) => {
             const meta = raw?.data?.fantasy_content?.league?.[0];
             startWeek = meta?.start_week; currentWeek = meta?.current_week; startDate = meta?.start_date;
           }
-        } catch {}
+        } catch { }
         res.status(400).json({ ok: false, error: 'No available players found', hint: 'league_window', startWeek, currentWeek, startDate });
         return;
       }
@@ -1055,7 +1057,7 @@ app.post('/api/pickups/apply', async (req, res) => {
         const filtered = (decision.claims || []).filter((c: any) => faSet.has(String(c.playerId)));
         if (filtered.length === 0) { res.status(400).json({ ok: false, error: 'No eligible free agents to add', reason: 'not_free_agents' }); return; }
         decision.claims = filtered;
-      } catch {}
+      } catch { }
     }
 
     // Determine if roster is full based on league rosterPositions (exclude IR slots)
@@ -1085,7 +1087,7 @@ app.post('/api/pickups/apply', async (req, res) => {
               c.dropPlayerId = String(d.dropPlayerId);
               if (!c.reasoning) c.reasoning = d.reasoning;
             }
-          } catch {}
+          } catch { }
         }
       }
       const missingIdx: number[] = [];
@@ -1111,7 +1113,7 @@ app.post('/api/pickups/apply', async (req, res) => {
           return c;
         });
       }
-    } catch {}
+    } catch { }
 
     // Optional explicit drop mappings from client: [{ addPlayerId, dropPlayerId }]
     try {
@@ -1123,7 +1125,7 @@ app.post('/api/pickups/apply', async (req, res) => {
           dropPlayerId: c.dropPlayerId || dropMap.get(String(c.playerId)),
         }));
       }
-    } catch {}
+    } catch { }
 
     const appSettings = new ConfigManager().loadAppSettings();
     const forceApply = req.body?.forceApply === true || String(req.body?.forceApply || '').toLowerCase() === 'true';
@@ -1159,7 +1161,7 @@ app.post('/api/pickups/apply', async (req, res) => {
             })),
           } as any;
         }
-      } catch {}
+      } catch { }
       // Ensure every claim has a drop before applying
       const missingIdx2: number[] = [];
       (decisionWithDrops.claims || []).forEach((c: any, i: number) => { if (!c.dropPlayerId) missingIdx2.push(i); });
@@ -1167,7 +1169,7 @@ app.post('/api/pickups/apply', async (req, res) => {
         res.status(400).json({ ok: false, error: 'Missing dropPlayerId for some pickups', rosterFull, missingDropIndices: missingIdx2, decision: decisionWithDrops });
         return;
       }
-      try { console.log('[Pickups] decisionWithDrops (server final):', JSON.stringify(decisionWithDrops)); } catch {}
+      try { console.log('[Pickups] decisionWithDrops (server final):', JSON.stringify(decisionWithDrops)); } catch { }
       if (!usingWaiversFallback) {
         applied = await write.applyPickups(leagueKey, teamKey, decisionWithDrops);
       } else {
@@ -1186,7 +1188,7 @@ app.post('/api/pickups/apply', async (req, res) => {
           res.json({ ok: true, decision, applied, rosterFull, lastError, usingWaiversFallback });
           return;
         }
-      } catch {}
+      } catch { }
     }
     res.json({ ok: true, decision, applied, rosterFull, usingWaiversFallback });
   } catch (e) {
@@ -1261,7 +1263,7 @@ app.post('/api/gemini/preview', async (req, res) => {
 
     // Try derive leagueKey from teamKey if missing
     if (!leagueKey && teamKey && typeof (api as any)['deriveLeagueKeyFromTeamKey'] === 'function') {
-      try { leagueKey = (api as any)['deriveLeagueKeyFromTeamKey'](teamKey); } catch {}
+      try { leagueKey = (api as any)['deriveLeagueKeyFromTeamKey'](teamKey); } catch { }
     }
 
     if (type === 'lineup') {
@@ -1345,7 +1347,7 @@ app.post('/api/gemini/preview', async (req, res) => {
               if (oppNum !== undefined) opponentKey = `${base}.t.${oppNum}`;
             }
           }
-        } catch {}
+        } catch { }
       }
       if (!opponentKey) { res.status(400).json({ ok: false, error: 'Could not infer opponent team key' }); return; }
       const league = await api.getLeague(leagueKey);
@@ -1410,7 +1412,7 @@ app.get('/api/metrics', (_req, res) => {
           } else if (obj.type === 'error') {
             metrics.errors += 1;
           }
-        } catch {}
+        } catch { }
       }
     }
     res.json({ ok: true, metrics });
@@ -1435,7 +1437,7 @@ app.post('/api/logs/clear', (_req, res) => {
 app.get('/api/env', (_req, res) => {
   try {
     const s = new ConfigManager().loadAppSettings();
-    try { res.setHeader('Cache-Control', 'no-store'); } catch {}
+    try { res.setHeader('Cache-Control', 'no-store'); } catch { }
     const responseData = {
       ok: true,
       leagueKey: s.leagueKey || null,
@@ -1517,17 +1519,19 @@ app.post('/api/schedule', (req, res) => {
 app.get('/api/features', (_req, res) => {
   const cm = new ConfigManager();
   const app = cm.loadAppSettings();
-  try { res.setHeader('Cache-Control', 'no-store'); } catch {}
-  res.json({ ok: true, features: {
-    kickoffEnabled: !!app.kickoffEnabled,
-    irAutomationEnabled: !!app.irAutomationEnabled,
-    waiverAutomationEnabled: !!app.waiverAutomationEnabled,
-    pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
-    tradesAutomationEnabled: !!app.tradesAutomationEnabled,
-    tradeResponsesAutomationEnabled: !!app.tradeResponsesAutomationEnabled,
-    debugYahooEnabled: !!app.debugYahooEnabled,
-    applyChanges: !!app.applyChanges,
-  }});
+  try { res.setHeader('Cache-Control', 'no-store'); } catch { }
+  res.json({
+    ok: true, features: {
+      kickoffEnabled: !!app.kickoffEnabled,
+      irAutomationEnabled: !!app.irAutomationEnabled,
+      waiverAutomationEnabled: !!app.waiverAutomationEnabled,
+      pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
+      tradesAutomationEnabled: !!app.tradesAutomationEnabled,
+      tradeResponsesAutomationEnabled: !!app.tradeResponsesAutomationEnabled,
+      debugYahooEnabled: !!app.debugYahooEnabled,
+      applyChanges: !!app.applyChanges,
+    }
+  });
 });
 
 // ---------- Manual run endpoints (kickoff, IR, waivers, trades) ----------
@@ -1642,7 +1646,7 @@ function deriveWaiverSchedule(): { day: number; hour: number; minute: number } {
     const wt = lp?.meta?.waiverTime as string | undefined;
     if (wt && typeof wt === 'string') {
       // Parse like: "Tue 7:00 AM" or "Tuesday 7:00AM" (approximate)
-      const days = ['sun','mon','tue','wed','thu','fri','sat'];
+      const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
       const lower = wt.toLowerCase();
       let day = days.findIndex((d) => lower.includes(d));
       if (day < 0) day = 2; // Tue default
@@ -1657,7 +1661,7 @@ function deriveWaiverSchedule(): { day: number; hour: number; minute: number } {
       }
       return { day, hour, minute };
     }
-  } catch {}
+  } catch { }
   // 3) Default Tue 7:00
   return { day: 2, hour: 7, minute: 0 };
 }
@@ -1673,7 +1677,7 @@ app.post('/api/features', (req, res) => {
       try {
         const existing = (global as any).__kickoff as any;
         if (existing && existing.stop) existing.stop();
-      } catch {}
+      } catch { }
       (global as any).__kickoff = null;
       if (enable) {
         const lk = app.leagueKey || '';
@@ -1695,7 +1699,7 @@ app.post('/api/features', (req, res) => {
       const enableW = !!body.waiverAutomationEnabled;
       app = new ConfigManager().saveAppSettings({ ...app, waiverAutomationEnabled: enableW });
       // Start/stop weekly waiver scheduler
-      try { const existing = (global as any).__waivers as any; if (existing && existing.stop) existing.stop(); } catch {}
+      try { const existing = (global as any).__waivers as any; if (existing && existing.stop) existing.stop(); } catch { }
       (global as any).__waivers = null;
       if (enableW) {
         const lk = app.leagueKey || '';
@@ -1733,19 +1737,21 @@ app.post('/api/features', (req, res) => {
       app = new ConfigManager().saveAppSettings({ ...app, applyChanges: enableApply });
     }
     // Keep in-memory snapshot in sync so /api/env reflects latest values
-    try { appSettings = app; } catch {}
+    try { appSettings = app; } catch { }
     configureIncomingTradeWatcher(app);
     configureTradeEvaluationScheduler(app);
-    res.json({ ok: true, features: {
-      kickoffEnabled: !!app.kickoffEnabled,
-      irAutomationEnabled: !!app.irAutomationEnabled,
-      waiverAutomationEnabled: !!app.waiverAutomationEnabled,
-      pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
-      tradesAutomationEnabled: !!app.tradesAutomationEnabled,
-      tradeResponsesAutomationEnabled: !!app.tradeResponsesAutomationEnabled,
-      debugYahooEnabled: !!app.debugYahooEnabled,
-      applyChanges: !!app.applyChanges,
-    }});
+    res.json({
+      ok: true, features: {
+        kickoffEnabled: !!app.kickoffEnabled,
+        irAutomationEnabled: !!app.irAutomationEnabled,
+        waiverAutomationEnabled: !!app.waiverAutomationEnabled,
+        pickupsAutomationEnabled: !!app.pickupsAutomationEnabled,
+        tradesAutomationEnabled: !!app.tradesAutomationEnabled,
+        tradeResponsesAutomationEnabled: !!app.tradeResponsesAutomationEnabled,
+        debugYahooEnabled: !!app.debugYahooEnabled,
+        applyChanges: !!app.applyChanges,
+      }
+    });
   } catch (e) {
     res.status(400).json({ ok: false, error: (e as Error).message });
   }
@@ -1770,9 +1776,9 @@ app.post('/api/deploy/update', async (req, res) => {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    
+
     console.log('[Deploy Update] Starting deployment update...');
-    
+
     // Step 1: Git pull latest changes
     console.log('[Deploy Update] Pulling latest changes from origin/main...');
     const gitResult = await execAsync('git pull origin main');
@@ -1780,7 +1786,7 @@ app.post('/api/deploy/update', async (req, res) => {
     if (gitResult.stderr && !gitResult.stderr.includes('Already up to date')) {
       console.warn('[Deploy Update] Git pull warnings/errors:', gitResult.stderr);
     }
-    
+
     // Step 2: Docker compose pull and restart
     console.log('[Deploy Update] Updating Docker containers...');
     const pullResult = await execAsync('docker compose pull');
@@ -1788,17 +1794,17 @@ app.post('/api/deploy/update', async (req, res) => {
     if (pullResult.stderr) {
       console.warn('[Deploy Update] Docker pull warnings:', pullResult.stderr);
     }
-    
+
     console.log('[Deploy Update] Restarting Docker containers...');
     const upResult = await execAsync('docker compose up -d --build');
     console.log('[Deploy Update] Docker up output:', upResult.stdout);
     if (upResult.stderr) {
       console.warn('[Deploy Update] Docker up warnings:', upResult.stderr);
     }
-    
+
     console.log('[Deploy Update] Deployment update completed successfully');
-    res.json({ 
-      ok: true, 
+    res.json({
+      ok: true,
       message: 'Deployment updated successfully',
       details: {
         git: gitResult.stdout?.trim() || 'No changes',
@@ -1808,9 +1814,9 @@ app.post('/api/deploy/update', async (req, res) => {
     });
   } catch (e) {
     console.error('[Deploy Update] Error during deployment update:', e);
-    res.status(500).json({ 
-      ok: false, 
-      error: `Deployment update failed: ${(e as Error).message}` 
+    res.status(500).json({
+      ok: false,
+      error: `Deployment update failed: ${(e as Error).message}`
     });
   }
 });
@@ -1841,7 +1847,7 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
             console.log('Kickoff scheduler enabled (pre: 30 min only).');
           }
         }
-      } catch {}
+      } catch { }
       // Enable weekly waiver scheduler on boot if configured
       try {
         const app = new ConfigManager().loadAppSettings();
@@ -1855,10 +1861,10 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
             const ws = new WeeklyScheduler(task, { day, hour, minute });
             ws.start();
             (global as any).__waivers = ws;
-            console.log(`Weekly waivers scheduler enabled (day=${day}, ${hour}:${minute.toString().padStart(2,'0')}).`);
+            console.log(`Weekly waivers scheduler enabled (day=${day}, ${hour}:${minute.toString().padStart(2, '0')}).`);
           }
         }
-      } catch {}
+      } catch { }
       // Watch logs directory and emit SSE events on changes
       try {
         const logsDir = path.join(process.cwd(), 'logs');
@@ -1869,13 +1875,13 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
             else if (name === 'gemini.log') sseBroadcast('gemini', { file: 'gemini.log', ts: Date.now() });
           });
         }
-      } catch {}
+      } catch { }
       // Incoming trade watcher (hourly)
       try {
         const app = new ConfigManager().loadAppSettings();
         configureIncomingTradeWatcher(app);
         configureTradeEvaluationScheduler(app);
-      } catch {}
+      } catch { }
     };
 
     if (enableHttps) {
