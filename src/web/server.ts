@@ -14,6 +14,7 @@ import { GeminiClient } from '../services/GeminiClient';
 import { GeminiLog } from '../services/GeminiLog';
 import { KickoffScheduler } from '../services/KickoffScheduler';
 import { ConfigManager } from '../services/ConfigManager';
+import { filterActionableIncomingTrades } from '../lib/tradeFilters';
 import type { AppSettings } from '../models/Config';
 
 dotenv.config();
@@ -770,152 +771,8 @@ app.get('/api/trades/incoming', async (req, res) => {
     if (debug) process.env.DEBUG_YAHOO = '1';
     const tradesAll = await api.getPendingTrades(leagueKey, teamKey, dbg);
     if (debug) process.env.DEBUG_YAHOO = prev;
-    // Filter: only proposed trades involving my team number
     const myTeamKey = teamKey || '';
-    const myTeamNum = (() => {
-      const idx = myTeamKey.lastIndexOf('.t.');
-      if (idx > 0) return myTeamKey.slice(idx + 3);
-      return '';
-    })();
-    const matchesTeamKey = (value?: string | null): boolean => {
-      if (!value) return false;
-      const str = String(value);
-      if (myTeamKey && str === myTeamKey) return true;
-      if (!myTeamNum) return false;
-      if (str === myTeamNum) return true;
-      return str.endsWith('.t.' + myTeamNum);
-    };
-    const extractMetaValue = (node: any, keys: string[]): any => {
-      for (const key of keys) {
-        if (key in (node || {})) return (node as any)[key];
-        const alt = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-        if (alt in (node || {})) return (node as any)[alt];
-      }
-      return undefined;
-    };
-    const isIncomingForMe = (t: any): boolean => {
-      if (!myTeamKey) return true;
-      const rawNodes: any[] = Array.isArray(t?.raw) ? t.raw : [];
-      let traderKey: string | undefined;
-      let tradeeKey: string | undefined;
-      let canRespond: any;
-      for (const node of rawNodes) {
-        if (!node || typeof node !== 'object') continue;
-        if (traderKey === undefined) {
-          const v = extractMetaValue(node, ['trader_team_key', 'trader_team_id']);
-          if (typeof v === 'string') traderKey = v;
-        }
-        if (tradeeKey === undefined) {
-          const v = extractMetaValue(node, ['tradee_team_key', 'tradee_team_id', 'tradee']);
-          if (typeof v === 'string') tradeeKey = v;
-        }
-        if (canRespond === undefined) {
-          canRespond = extractMetaValue(node, ['current_login_can_respond']);
-        }
-      }
-      const traderMatches = traderKey ? matchesTeamKey(traderKey) : false;
-      const tradeeMatches = tradeeKey ? matchesTeamKey(tradeeKey) : false;
-      const canRespondBool = (() => {
-        if (canRespond === undefined || canRespond === null) return undefined;
-        if (typeof canRespond === 'number') return canRespond > 0;
-        if (typeof canRespond === 'string') {
-          const norm = canRespond.trim().toLowerCase();
-          if (norm === '1' || norm === 'true') return true;
-          if (norm === '0' || norm === 'false') return false;
-        }
-        return Boolean(canRespond);
-      })();
-      if (traderMatches) return false;
-      if (tradeeMatches) return true;
-      if (canRespondBool === true) return true;
-      return false;
-    };
-    const involvesTeam = (t: any): boolean => {
-      if (!myTeamKey) return true; // if unknown, don't filter out
-      // Check normalized lists
-      if (Array.isArray(t.teamKeys) && t.teamKeys.some((k: string) => matchesTeamKey(k))) return true;
-      if (Array.isArray(t.teamIds) && t.teamIds.some((id: string) => matchesTeamKey(id))) return true;
-      if (Array.isArray(t.moves) && t.moves.some((m: any) => matchesTeamKey(m?.source) || matchesTeamKey(m?.destination))) return true;
-      // Fallback: deep scan raw for strings that match the team key/number
-      const seen = new Set<any>();
-      const scan = (n: any): boolean => {
-        if (!n || typeof n !== 'object') return false;
-        if (seen.has(n)) return false; seen.add(n);
-        if (Array.isArray(n)) {
-          for (const sv of n) {
-            if (typeof sv === 'string' && matchesTeamKey(sv)) return true;
-            if (typeof sv === 'object' && scan(sv)) return true;
-          }
-          return false;
-        }
-        for (const v of Object.values(n)) {
-          if (typeof v === 'string' && matchesTeamKey(v)) return true;
-          if (typeof v === 'object' && scan(v)) return true;
-        }
-        return false;
-      };
-      try { if (t.raw && scan(t.raw)) return true; } catch {}
-      return false;
-    };
-    const includesMyTeamInMoves = (t: any): boolean => {
-      if (!myTeamKey) return true;
-      const moves = Array.isArray(t?.moves) ? t.moves : [];
-      if (moves.length === 0) return true;
-      return moves.some((m: any) => matchesTeamKey(m?.source) || matchesTeamKey(m?.destination));
-    };
-    const statusMatches = (t: any, keyword: string): boolean => {
-      const needle = keyword.toLowerCase();
-      const direct = String(t?.status || '').toLowerCase();
-      if (direct.includes(needle)) return true;
-      try {
-        const seen = new Set<any>();
-        const scan = (n: any, keyHint = ''): boolean => {
-          if (typeof n === 'string') {
-            if (keyHint.toLowerCase().includes('status') && n.toLowerCase().includes(needle)) return true;
-            return false;
-          }
-          if (!n || typeof n !== 'object') return false;
-          if (seen.has(n)) return false; seen.add(n);
-          if (Array.isArray(n)) {
-            for (const item of n) {
-              if (scan(item, keyHint)) return true;
-            }
-            return false;
-          }
-          for (const [k, v] of Object.entries(n)) {
-            if (typeof v === 'string') {
-              if (k.toLowerCase().includes('status') && v.toLowerCase().includes(needle)) return true;
-            } else if (scan(v, k)) {
-              return true;
-            }
-          }
-          return false;
-        };
-        if (t.raw && scan(t.raw)) return true;
-      } catch {}
-      return false;
-    };
-    const isProposed = (t: any): boolean => statusMatches(t, 'propos');
-    const isSuccessful = (t: any): boolean => statusMatches(t, 'success');
-    // Deduplicate by id
-    const dedup = (() => {
-      const seen = new Set<string>();
-      const out: any[] = [];
-      for (const t of (tradesAll || [])) {
-        const id = String(t?.id || '');
-        const key = id || JSON.stringify({ moves: t?.moves || [], teamKeys: t?.teamKeys || [] });
-        if (seen.has(key)) continue; seen.add(key); out.push(t);
-      }
-      return out;
-    })();
-    const withoutSuccessful = dedup.filter((t) => !isSuccessful(t));
-    // Filter to trades involving my team (when teamKey is known)
-    const involvingMine = withoutSuccessful.filter(involvesTeam).filter(includesMyTeamInMoves);
-    // Filter to pending/proposed where possible
-    const pending = involvingMine.filter(isProposed);
-    const incomingPending = pending.filter(isIncomingForMe);
-    const incomingAll = involvingMine.filter(isIncomingForMe);
-    const trades = incomingPending.length ? incomingPending : incomingAll;
+    const trades = filterActionableIncomingTrades(tradesAll, myTeamKey);
     // Append to trades debug log for traceability
     try {
       const fs = require('fs');

@@ -55,6 +55,13 @@ describe('GET /api/trades/incoming filtering', () => {
         id: 'keep',
         status: 'proposed',
         moves: [{ source: myTeamKey, destination: otherTeamKey }],
+        raw: [
+          {
+            trader_team_key: otherTeamKey,
+            tradee_team_key: myTeamKey,
+            current_login_can_respond: 1,
+          },
+        ],
       },
       {
         id: 'drop-no-moves',
@@ -85,4 +92,3 @@ describe('GET /api/trades/incoming filtering', () => {
     expect(returnedIds).toEqual(['keep']);
   });
 });
-

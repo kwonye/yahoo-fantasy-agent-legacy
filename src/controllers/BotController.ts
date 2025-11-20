@@ -11,6 +11,7 @@ import { BotDecision } from '../models/Decision';
 import { DecisionType } from '../models/Common';
 import { YahooWriteAdapter } from '../services/YahooWriteAdapter';
 import { computeIrAssignments, computeFlexAssignments } from '../services/RosterHygiene';
+import { filterActionableIncomingTrades } from '../lib/tradeFilters';
 
 export interface BotControllerOptions {
   leagueKey: string;
@@ -725,7 +726,13 @@ export class BotController {
         }
       } catch {}
       const offers = await this.yahoo.getPendingTrades(this.leagueKey);
-      if (!Array.isArray(offers) || offers.length === 0) { this.audit.recordAction('trades_incoming_none'); return; }
+      if (!Array.isArray(offers) || offers.length === 0) { this.audit.recordAction('trades_incoming_none', { reason: 'no_trades_found' }); return; }
+      const actionableOffers = filterActionableIncomingTrades(offers, this.teamKey);
+      if (actionableOffers.length === 0) {
+        this.audit.recordAction('trades_incoming_none', { reason: 'no_actionable_trades', fetched: offers.length });
+        return;
+      }
+      this.audit.recordAction('trades_incoming_candidates', { total: offers.length, actionable: actionableOffers.length });
       // Compute needs/surplus via cached analysis
       const league = await this.yahoo.getLeague(this.leagueKey);
       this.setCanonicalKeys({ leagueKey: league?.id });
@@ -740,7 +747,7 @@ export class BotController {
       const gemini = new (require('../services/GeminiClient').GeminiClient)();
       // Limit number of offers evaluated by remaining budget
       let remaining = this.quota.getRemaining();
-      for (const offer of offers) {
+      for (const offer of actionableOffers) {
         if (this.evaluatedTradeIds.has(offer.id)) {
           continue;
         }
