@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 import { ConfigManager } from '../services/ConfigManager';
 import { YahooOAuthClient } from '../services/YahooOAuthClient';
 import { YahooApiService } from '../services/YahooApiService';
@@ -35,6 +38,7 @@ export class BotController {
   private readonly teamKey: string;
   private readonly write: YahooWriteAdapter;
   private readonly quota: GeminiQuota;
+  private readonly rosterBalanceCachePath: string;
   private canonicalLeagueKey: string;
   private canonicalTeamKey: string;
   private canonicalKeysResolved: boolean;
@@ -45,6 +49,7 @@ export class BotController {
     surplus: string[];
     reasoning: string;
     timestamp: number;
+    rosterHash?: string;
   } | null = null;
 
   private evaluatedTradeIds: Set<string> = new Set();
@@ -76,6 +81,8 @@ export class BotController {
     this.leagueKey = opts.leagueKey;
     this.teamKey = opts.teamKey;
     this.quota = GeminiQuota.getInstance();
+    this.rosterBalanceCachePath = path.join(process.cwd(), 'logs', 'roster_balance_cache.json');
+    try { fs.mkdirSync(path.dirname(this.rosterBalanceCachePath), { recursive: true }); } catch {}
     this.canonicalLeagueKey = opts.leagueKey;
     this.canonicalTeamKey = opts.teamKey;
     this.canonicalKeysResolved = this.isCanonicalKey(this.canonicalLeagueKey, 'league') && this.isCanonicalKey(this.canonicalTeamKey, 'team');
@@ -99,6 +106,51 @@ export class BotController {
     }
     if (this.isCanonicalKey(this.canonicalLeagueKey, 'league') && this.isCanonicalKey(this.canonicalTeamKey, 'team')) {
       this.canonicalKeysResolved = true;
+    }
+  }
+
+  private loadRosterBalanceCacheFromDisk(): void {
+    if (this.rosterBalanceCache) return;
+    try {
+      if (!fs.existsSync(this.rosterBalanceCachePath)) return;
+      const raw = fs.readFileSync(this.rosterBalanceCachePath, 'utf8');
+      const data = JSON.parse(raw);
+      if (data && typeof data === 'object' && typeof data.timestamp === 'number') {
+        this.rosterBalanceCache = {
+          needs: Array.isArray((data as any).needs) ? (data as any).needs : [],
+          surplus: Array.isArray((data as any).surplus) ? (data as any).surplus : [],
+          reasoning: typeof (data as any).reasoning === 'string' ? (data as any).reasoning : 'Cached roster balance',
+          timestamp: Number((data as any).timestamp) || Date.now(),
+          rosterHash: typeof (data as any).rosterHash === 'string' ? (data as any).rosterHash : undefined,
+        };
+      }
+    } catch { }
+  }
+
+  private persistRosterBalanceCache(): void {
+    if (!this.rosterBalanceCache) return;
+    try {
+      fs.writeFileSync(this.rosterBalanceCachePath, JSON.stringify(this.rosterBalanceCache, null, 2), 'utf8');
+    } catch { }
+  }
+
+  private computeRosterHash(roster: any[]): string {
+    try {
+      const normalized = Array.isArray(roster)
+        ? roster
+            .map((p) => ({
+              id: String((p as any).id || ''),
+              name: String((p as any).name || ''),
+              position: String((p as any).position || ''),
+              team: String((p as any).team || ''),
+              status: String((p as any).status || ''),
+            }))
+            .sort((a, b) => a.id.localeCompare(b.id))
+        : [];
+      const str = JSON.stringify(normalized);
+      return crypto.createHash('sha1').update(str).digest('hex');
+    } catch {
+      return '';
     }
   }
 
@@ -126,18 +178,20 @@ export class BotController {
 
   // Roster balance cache management methods
   private isRosterBalanceCacheValid(): boolean {
+    this.loadRosterBalanceCacheFromDisk();
     if (!this.rosterBalanceCache) return false;
     
-    // Consider cache valid for 23 hours to ensure it refreshes at least once daily
+    // Consider cache valid for 24 hours; refreshed sooner if roster hash changes
     const cacheAgeMs = Date.now() - this.rosterBalanceCache.timestamp;
-    const maxAgeMs = 23 * 60 * 60 * 1000; // 23 hours
-    
-    return cacheAgeMs < maxAgeMs;
+    const maxAgeMs = 24 * 60 * 60 * 1000; // 24 hours
+    if (cacheAgeMs >= maxAgeMs) return false;
+    return true;
   }
 
   private async getRosterBalance(roster: any[], leagueSettings: any): Promise<{ needs: string[]; surplus: string[]; reasoning: string }> {
+    const rosterHash = this.computeRosterHash(roster);
     // Return cached result if valid
-    if (this.isRosterBalanceCacheValid()) {
+    if (this.isRosterBalanceCacheValid() && this.rosterBalanceCache?.rosterHash === rosterHash) {
       this.audit.recordAction('roster_balance_cache_hit');
       return {
         needs: this.rosterBalanceCache!.needs,
@@ -157,7 +211,7 @@ export class BotController {
     }
 
     try {
-      if (this.decisions) {
+      if (this.decisions && this.quota.getRemaining() > 0) {
         const gemini = new (require('../services/GeminiClient').GeminiClient)();
         const out = await gemini.analyzeRosterBalance(roster, leagueSettings);
         needs = Array.isArray(out.needs) ? out.needs : [];
@@ -174,8 +228,10 @@ export class BotController {
       needs,
       surplus,
       reasoning,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      rosterHash
     };
+    this.persistRosterBalanceCache();
 
     return { needs, surplus, reasoning };
   }
@@ -744,6 +800,11 @@ export class BotController {
       const leagueProfile = lpMgr.loadLeagueProfile(this.leagueKey);
       const myEntries = await this.yahoo.getTeamRosterWithSlots(this.teamKey);
       const myRoster = myEntries.map((e) => e.player);
+      const tradeDeadline = (leagueProfile as any)?.meta?.tradeEndDate || (league as any)?.settings?.tradeEndDate;
+      if (tradeDeadline && new Date(tradeDeadline).getTime() < Date.now()) {
+        this.audit.recordAction('trades_incoming_skipped', { reason: 'trade_deadline_passed', deadline: tradeDeadline });
+        return;
+      }
       
       // Use cached roster balance analysis to avoid calling Gemini every hour
       const { needs, surplus } = await this.getRosterBalance(myRoster, league.settings);
@@ -751,24 +812,28 @@ export class BotController {
       const gemini = new (require('../services/GeminiClient').GeminiClient)();
       // Limit number of offers evaluated by remaining budget
       let remaining = this.quota.getRemaining();
+      const maxPerPass = Math.max(1, Math.min(5, remaining));
+      let evaluated = 0;
       for (const offer of actionableOffers) {
         if (this.evaluatedTradeIds.has(offer.id)) {
           continue;
         }
 
+        if (evaluated >= maxPerPass) { this.audit.recordAction('trades_incoming_batch_limit', { evaluated }); break; }
         if (remaining <= 0) { this.audit.recordAction('trades_incoming_budget_exhausted'); break; }
         const tradeId = String(offer.id || '');
+        if (!offer.moves || offer.moves.length === 0) {
+          this.audit.recordAction('trade_incoming_skip_empty', { tradeId });
+          continue;
+        }
         let accept = false;
         try {
-          if (offer.moves && offer.moves.length > 0) {
-            const decision = await gemini.evaluateIncomingTradeOffer(myRoster, league.settings, needs, surplus, offer.moves, this.teamKey, leagueProfile);
-            this.evaluatedTradeIds.add(offer.id);
-            accept = !!decision.shouldAccept && (decision.confidence ?? 0) >= 0.6;
-            this.audit.recordAction('trade_incoming_eval', { tradeId, accept, confidence: decision.confidence, reasoning: decision.reasoning });
-            remaining = this.quota.getRemaining(); // update after a call
-          } else {
-            this.audit.recordAction('trade_incoming_unparsed', { tradeId });
-          }
+          const decision = await gemini.evaluateIncomingTradeOffer(myRoster, league.settings, needs, surplus, offer.moves, this.teamKey, leagueProfile);
+          this.evaluatedTradeIds.add(offer.id);
+          accept = !!decision.shouldAccept && (decision.confidence ?? 0) >= 0.6;
+          this.audit.recordAction('trade_incoming_eval', { tradeId, accept, confidence: decision.confidence, reasoning: decision.reasoning });
+          remaining = this.quota.getRemaining(); // update after a call
+          evaluated += 1;
         } catch (e) {
           this.audit.recordError(e as Error, { phase: 'trades_incoming_eval', tradeId });
           accept = false;

@@ -144,7 +144,7 @@ export default function AppPage({ initialQuota }: AppPageProps) {
   const [yahooClientSecret, setYahooClientSecret] = useState('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiModel, setGeminiModel] = useState('gemini-1.5-pro');
-  const [geminiQuota, setGeminiQuota] = useState(200);
+  const [geminiQuota, setGeminiQuota] = useState(250);
   const [leagueKeyInput, setLeagueKeyInput] = useState('');
   const [teamKeyInput, setTeamKeyInput] = useState('');
   const [redirectUriInput, setRedirectUriInput] = useState('');
@@ -382,7 +382,7 @@ export default function AppPage({ initialQuota }: AppPageProps) {
       if (map.geminiRaw?.ok) {
         if (!geminiKeyTouched) setGeminiApiKey(map.geminiRaw.apiKey || '');
         if (!geminiModelTouched) setGeminiModel(map.geminiRaw.model || 'gemini-1.5-pro');
-        if (!geminiQuotaTouched) setGeminiQuota(map.geminiRaw.geminiQuota || 200);
+        if (!geminiQuotaTouched) setGeminiQuota(map.geminiRaw.geminiQuota || 250);
       }
 
       if (typeof window !== 'undefined') {

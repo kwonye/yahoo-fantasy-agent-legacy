@@ -16,7 +16,7 @@ export class GeminiQuota {
     const configManager = new ConfigManager();
     const geminiCreds = configManager.loadGeminiCredentials();
     const envLimit = parseInt(process.env.MAX_GEMINI_CALLS_PER_DAY || '', 10);
-    this.limit = geminiCreds?.geminiQuota ?? (Number.isFinite(envLimit) && envLimit > 0 ? envLimit : (limit ?? 200));
+    this.limit = geminiCreds?.geminiQuota ?? (Number.isFinite(envLimit) && envLimit > 0 ? envLimit : (limit ?? 250));
   }
 
   public static getInstance(): GeminiQuota {
@@ -75,4 +75,3 @@ export class GeminiQuota {
     return true;
   }
 }
-

@@ -78,13 +78,13 @@ docker compose up --build
 
 3) Open the dashboard:
 
-- https://localhost:3000
+- http://localhost:3000
 
 Notes:
 
-- HTTPS is enabled by default. If `config/certs/cert.pem` and `config/certs/key.pem` are missing, a self‑signed certificate is generated on container start.
+- The dashboard runs over HTTP. Configure your Yahoo OAuth redirect URL with `https` even though the local server is HTTP.
 - Data persists via bind mounts:
-  - `config/` – league settings, TLS certs
+  - `config/` – league settings and other config files
   - `logs/` – server and Yahoo/Gemini logs
   - `.secure/` – encrypted credentials (Yahoo/Gemini)
 - For actual Yahoo writes, enable “Apply Changes” from the dashboard (Features). Yahoo writes always use XML.
@@ -109,4 +109,3 @@ docker compose -f docker-compose.dev.yml up --build
 - Gemini API key is saved via the dashboard (Credentials) and not read from environment.
   Toggle “Apply Changes” from the dashboard (Features) to perform live writes.
   (Yahoo writes always use XML; no separate env variable required.)
-- `ENABLE_HTTPS` – `1` to enable HTTPS (compose defaults to `1`). Certs are expected under `config/certs` and will be generated if missing.

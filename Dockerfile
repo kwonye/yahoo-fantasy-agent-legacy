@@ -34,26 +34,22 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
 
-# Default ports (using HTTPS if enabled via env)
+# Default port
 EXPOSE 3000
 
-# Install openssl and git
-RUN apk add --no-cache openssl git curl && \
+# Install git and curl
+RUN apk add --no-cache git curl && \
     curl -sSL https://github.com/cli/cli/releases/download/v2.50.0/gh_2.50.0_linux_arm64.tar.gz -o gh.tar.gz && \
     tar -xvf gh.tar.gz && \
     mv gh_2.50.0_linux_arm64/bin/gh /usr/local/bin/ && \
     rm -rf gh.tar.gz gh_2.50.0_linux_arm64 && \
     git config --global --add safe.directory /app
 
-# Entrypoint to generate self-signed certs if needed
+# Entrypoint for runtime setup
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Recommended env (override in Docker/compose):
-#  - ENABLE_HTTPS=1
-#  - HTTPS_PORT=3000
-#  - SSL_CERT_PATH=/app/config/certs/cert.pem
-#  - SSL_KEY_PATH=/app/config/certs/key.pem
 #  - YAHOO_XML_WRITE=1
 #  - DEBUG_YAHOO=1
 

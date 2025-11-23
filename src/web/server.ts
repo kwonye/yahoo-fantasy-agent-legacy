@@ -1,6 +1,5 @@
 import express from 'express';
 import http from 'http';
-import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
@@ -1836,14 +1835,9 @@ app.post('/api/deploy/update', async (req, res) => {
   }
 });
 
-export function startServer(portOverride?: number): Promise<http.Server | https.Server> {
+export function startServer(portOverride?: number): Promise<http.Server> {
   const port = portOverride ?? defaultPort;
   return new Promise((resolve, reject) => {
-    const certPath = path.join(process.cwd(), 'config', 'certs', 'cert.pem');
-    const keyPath = path.join(process.cwd(), 'config', 'certs', 'key.pem');
-    const httpsEnv = String(process.env.ENABLE_HTTPS || '').trim().toLowerCase();
-    const enableHttps = httpsEnv === '1' || httpsEnv === 'true' || httpsEnv === 'yes';
-
     const startPostHooks = () => {
       // Optionally enable kickoff checks
       try {
@@ -1898,31 +1892,6 @@ export function startServer(portOverride?: number): Promise<http.Server | https.
         configureTradeEvaluationScheduler(app);
       } catch { }
     };
-
-    if (enableHttps) {
-      if (!(fs.existsSync(certPath) && fs.existsSync(keyPath))) {
-        const msg = 'HTTPS requested but TLS certs are missing or invalid. Expected at config/certs/cert.pem and config/certs/key.pem';
-        console.error(msg);
-        reject(new Error('Missing SSL cert/key for HTTPS'));
-        return;
-      }
-      try {
-        const creds = { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) } as any;
-        const httpsServer = https.createServer(creds, app);
-        httpsServer.listen(port, () => {
-          console.log(`Web dashboard listening on https://localhost:${port}`);
-          (global as any).__httpsServer = httpsServer;
-          startPostHooks();
-          resolve(httpsServer);
-        });
-        httpsServer.on('error', reject);
-        return;
-      } catch (e) {
-        console.warn('HTTPS startup error:', (e as Error).message);
-        reject(e as Error);
-        return;
-      }
-    }
 
     const server = http.createServer(app);
     server.listen(port, () => {
