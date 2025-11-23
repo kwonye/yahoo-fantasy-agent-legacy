@@ -13,12 +13,12 @@ gh repo sync -b main
 echo "Repository synced. Restarting Docker containers..."
 
 # Stop and remove the old containers
-docker-compose down
+docker compose down
 
 # Rebuild the containers
-docker-compose build
+docker compose build
 
 # Start the new containers in detached mode
-docker-compose up -d
+docker compose up -d
 
 echo "Deployment successful!"
