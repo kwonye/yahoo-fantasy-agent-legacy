@@ -18,6 +18,7 @@ export enum PlayerStatus {
   QUESTIONABLE = 'QUESTIONABLE',
   DOUBTFUL = 'DOUBTFUL',
   BYE = 'BYE',
+  SUSPENDED = 'SUSPENDED',
 }
 
 export enum DecisionType {

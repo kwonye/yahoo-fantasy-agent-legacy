@@ -507,7 +507,7 @@ export class GeminiClient {
       '- Defense/Kicker: Stream these positions based strictly on matchup favorability if you have options.',
       'Key guidelines:',
       '- Respect positional eligibility and ensure no illegal starters. Do not bench locked-in elite production without clear reason.',
-      '- Avoid starting players on BYE/OUT/SUSP/IR statuses unless absolutely no legal alternative exists.',
+      '- CRITICAL: Players with status "SUSP", "SUSPENDED", "OUT", "IR", or "BYE" score ZERO points. DO NOT start them under any circumstances if a valid active player is available.',
       '- Leverage matchup difficulty, offensive/defensive pace, recent usage (snap share, targets, carries), injury trends, and weather if provided.',
       '- Highlight swaps only when the expected benefit (floor + ceiling) outweighs risk. Bench list should be ordered by next-man-up importance (handcuffs, upside stashes, depth).',
       '- When citing injuries or news, only reference details present in the provided data or when retrieved via the Google Search tool; if none exist, explicitly note that no recent update is available.',
