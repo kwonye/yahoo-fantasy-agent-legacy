@@ -510,7 +510,7 @@ app.get('/api/creds/gemini/raw', (_req, res) => {
     const cm = new ConfigManager();
     const c = cm.loadGeminiCredentials();
     if (!c) { res.json({ ok: false, error: 'No Gemini credentials saved' }); return; }
-    res.json({ ok: true, apiKey: c.apiKey || '', model: (c as any).model || '' });
+    res.json({ ok: true, apiKey: c.apiKey || '', model: (c as any).model || '', geminiQuota: c.geminiQuota });
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
   }
