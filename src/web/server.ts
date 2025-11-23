@@ -1098,15 +1098,11 @@ app.post('/api/pickups/apply', async (req, res) => {
       }
       const missingIdx: number[] = [];
       (decision.claims || []).forEach((c: any, i: number) => { if (!c.dropPlayerId) missingIdx.push(i); });
-      if (missingIdx.length > 0) {
-        res.status(400).json({ ok: false, error: 'Roster is full; each pickup must include dropPlayerId', rosterFull: true, missingDropIndices: missingIdx, decision });
-        return;
-      }
     }
 
     // If dropPlayerId not provided, heuristically assign from bench
     try {
-      if (!rosterFull) {
+      if (true) {
         const entries: Array<{ slot?: string; player: any }> = myEntries as any;
         const rosterIds = entries.map(e => String(e.player.id));
         const addSet = new Set((decision.claims || []).map((c: any) => String(c.playerId)));
