@@ -25,6 +25,16 @@ export class DecisionService {
     leagueSettings: LeagueSettings,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<LineupDecision> {
+    if (roster.length === 0) {
+      return {
+        recommendedLineup: { starters: {}, bench: [] },
+        changes: [],
+        confidence: 1.0,
+        reasoning: 'Roster is empty, no lineup decisions to make.',
+        projectedPoints: 0,
+      };
+    }
+
     const raw = await this.gemini.optimizeLineup(roster, leagueSettings, { applyChanges: true }, context);
     // Validate minimal fields and confidence
     const confidence = clamp(raw.confidence ?? 0, 0, 1);
@@ -43,7 +53,15 @@ export class DecisionService {
     availablePlayers: Player[],
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<WaiverDecision> {
-    
+    if (availablePlayers.length === 0) {
+      return {
+        claims: [],
+        reasoning: 'No available players to evaluate for waivers.',
+        confidence: 1.0,
+        expectedValue: 0,
+      };
+    }
+
     const raw = await this.gemini.evaluateWaiver(
       availablePlayers,
       { applyChanges: true },
@@ -105,6 +123,13 @@ export class DecisionService {
     theirRoster: Player[],
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<TradeDecision> {
+    if (myRoster.length === 0 && theirRoster.length === 0) {
+      return {
+        shouldTrade: false,
+        reasoning: "No players were specified in the 'Players I Would Receive' or 'Players I Would Give Up' lists, therefore no trade offer was provided for evaluation.",
+        confidence: 1.0,
+      } as TradeDecision;
+    }
 
     const raw = await this.gemini.evaluateTrade(myRoster, theirRoster, { applyChanges: true }, context);
     const confidence = clamp(raw.confidence ?? 0, 0, 1);
@@ -140,6 +165,14 @@ export class DecisionService {
     opponents: Array<{ teamKey: string; teamName?: string; roster: Player[] }>,
     context: Omit<AnalysisContext, 'userPreferences'>
   ): Promise<TradeDecision> {
+    const allOpponentRostersEmpty = opponents.every(opp => opp.roster.length === 0);
+    if (myRoster.length === 0 && allOpponentRostersEmpty) {
+      return {
+        shouldTrade: false,
+        reasoning: "No players were specified in the 'Players I Would Receive' or 'Players I Would Give Up' lists, therefore no trade offer was provided for evaluation.",
+        confidence: 1.0,
+      } as TradeDecision;
+    }
 
     const raw = await this.gemini.evaluateTradesMulti(myRoster, opponents, { applyChanges: true }, context);
     const confidence = clamp(raw.confidence ?? 0, 0, 1);

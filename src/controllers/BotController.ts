@@ -152,6 +152,10 @@ export class BotController {
     let surplus: string[] = [];
     let reasoning = 'Computed via heuristic';
 
+    if (!roster || roster.length === 0) {
+       return { needs, surplus, reasoning: 'Roster is empty' };
+    }
+
     try {
       if (this.decisions) {
         const gemini = new (require('../services/GeminiClient').GeminiClient)();

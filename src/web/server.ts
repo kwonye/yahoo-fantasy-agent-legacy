@@ -837,6 +837,10 @@ app.post('/api/trades/evaluate', async (req, res) => {
     const league = await api.getLeague(leagueKey);
     const myEntries = await api.getTeamRosterWithSlots(teamKey);
     const myRoster = myEntries.map((e) => e.player);
+    if (myRoster.length === 0) {
+      res.json({ ok: true, tradeId, decision: { shouldAccept: false, reasoning: 'My roster is empty', confidence: 1.0 }, needs: [], surplus: [] });
+      return;
+    }
     const leagueProfile = new ConfigManager().loadLeagueProfile(leagueKey);
     // Needs/surplus analysis
     const gemini = new (require('../services/GeminiClient').GeminiClient)();
@@ -912,6 +916,9 @@ app.post('/api/trades/apply', async (req, res) => {
     const league = await api.getLeague(leagueKey);
     const myEntries = await api.getTeamRosterWithSlots(teamKey);
     const myRoster = myEntries.map((e) => e.player);
+    
+    if (myRoster.length === 0) { res.status(400).json({ ok: false, error: 'My roster is empty, cannot evaluate trades' }); return; }
+
     // Gather opponent teams
     let opponentTeams: Array<{ key: string; name?: string }> = [];
     try { opponentTeams = await api.getLeagueTeams(leagueKey); } catch { }
@@ -1221,6 +1228,14 @@ app.get('/api/trade-block', async (req, res) => {
     let needs: string[] = [];
     let surplus: string[] = [];
     let reasoning = 'Computed via heuristic';
+
+    if (roster.length === 0) {
+      const data = { needs, surplus, reasoning: 'Roster is empty' };
+      tradeBlockCache.set(cacheKey, { ts: Date.now(), data });
+      res.json({ ok: true, ...data });
+      return;
+    }
+
     try {
       const client = new GeminiClient();
       const out = await client.analyzeRosterBalance(roster, league.settings);

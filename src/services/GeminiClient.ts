@@ -315,14 +315,18 @@ export class GeminiClient {
     const starters = leagueSettings?.rosterPositions || {} as Record<string, number>;
     const userParts = [
       'Task: Identify positional needs and surplus for trades based on roster depth vs league lineup requirements.',
+      'Strategy:',
+      '- Needs: Positions where I have fewer starters than required, or where my starters are weak/injured/on-bye.',
+      '- Surplus: Positions where I have multiple high-quality bench options that could be traded without hurting my starting lineup.',
+      '- Depth: Consider bye weeks and injury insurance. Having 1 backup QB in a 1QB league is usually sufficient (surplus if 2+ backups).',
       'Rules: Respond with JSON only. No commentary beyond a brief reasoning string.',
       'Guidance: Use provided status/injury notes; if no recent information is available, acknowledge the uncertainty instead of inventing updates.',
       'You MUST call the Google Search tool before finalizing this analysis and augment the provided data with any useful snippets (and note when the search adds nothing new).',
       'Schema: { "needs": string[], "surplus": string[], "reasoning": string }',
       '',
-      'LeagueRosterPositions JSON:',
+      'LeagueRosterPositions (Starters):',
       JSON.stringify(starters, null, 2),
-      'MyRosterCounts JSON:',
+      'MyRosterCounts (Total):',
       JSON.stringify(counts, null, 2),
       'MyRosterPlayers JSON:',
       JSON.stringify(roster.map(p => ({ id: p.id, name: p.name, position: p.position, team: p.team })), null, 2),
@@ -497,6 +501,10 @@ export class GeminiClient {
     const meta = lp?.meta || {};
     return [
       'Task: Produce the optimal starting lineup for the upcoming scoring period.',
+      'Strategy:',
+      '- Maximize Projected Points: Prioritize high-floor players for safe matchups and high-ceiling "boom" players if the team is an underdog.',
+      '- Flex Strategy: Use the Flex spot for the player with the highest upside who might have lower floor, or the safest volume play depending on the rest of the lineup\'s volatility.',
+      '- Defense/Kicker: Stream these positions based strictly on matchup favorability if you have options.',
       'Key guidelines:',
       '- Respect positional eligibility and ensure no illegal starters. Do not bench locked-in elite production without clear reason.',
       '- Avoid starting players on BYE/OUT/SUSP/IR statuses unless absolutely no legal alternative exists.',
@@ -545,6 +553,10 @@ export class GeminiClient {
     const meta = lp?.meta || {};
     const guidance: string[] = [
       'Task: Rank the waiver priorities (up to maxClaims) that most improve this roster.',
+      'Strategy:',
+      '- Value vs. Cost: If FAAB is used, bid aggressively for clear starters (RB1/WR2 types) but conservatively for depth or streamers.',
+      '- Positional Scarcity: Prioritize scarce positions (RB, TE) over abundant ones (WR, QB) unless a specific player is a massive upgrade.',
+      '- Future Outlook: Look for "league winners" (high-upside handcuffs, rookies breaking out) over low-ceiling veterans.',
       'Guidelines:',
       '- Start with positional needs, injury insurance, bye-week coverage, and upside relative to league scoring.',
       '- Emphasize players with tangible roles (volume / red-zone / target share) or high-upside stashes when floor options are exhausted.',
@@ -594,6 +606,10 @@ export class GeminiClient {
     const meta = lp?.meta || {};
     return [
       'Task: Recommend immediate FREE-AGENT add/drop moves (no waiver priority).',
+      'Strategy:',
+      '- Instant Impact: Prioritize players who can start THIS WEEK or cover an immediate injury/bye need.',
+      '- Churn Bottom of Roster: Be willing to drop low-upside bench warmers for high-variance fliers or necessary streamers.',
+      '- Defensive/Kicker Streaming: If streaming, look for favored matchups or high-total games.',
       'Guidelines:',
       '- Limit output to maxAdds moves and ensure each add has a dropPlayerId pulled from MyRoster JSON.',
       '- Maintain roster legality: avoid leaving positions empty or dropping high-value starters without clear upgrades.',
@@ -632,8 +648,14 @@ export class GeminiClient {
     const lp: any = (context as any)?.leagueProfile;
     const scoring = lp?.scoring || {};
     const meta = lp?.meta || {};
+    const needs = (context as any)?.rosterNeeds || [];
+    const surplus = (context as any)?.rosterSurplus || [];
     return [
       'Task: Propose a realistic, mutually beneficial trade with this specific opponent.',
+      'Strategy:',
+      '- Win-Win: Identify a surplus on my team that fills a need on their team, and vice versa.',
+      '- Buy Low / Sell High: Look for players underperforming their expected stats (buy candidates) or overperforming unsustainable efficiency (sell candidates).',
+      '- Roster Balance: Use the provided "My Needs" and "My Surplus" lists to guide your targeting.',
       'Guidelines:',
       '- Diagnose my roster needs/surplus vs required starters, then identify how the opponent can help while also improving their roster.',
       '- Use the provided player "id" field for every entry in myPlayers/theirPlayers; never substitute names or other identifiers.',
@@ -655,6 +677,8 @@ export class GeminiClient {
       JSON.stringify(meta, null, 2),
       'LeagueScoring JSON:',
       JSON.stringify(scoring, null, 2),
+      'My Needs:', JSON.stringify(needs),
+      'My Surplus:', JSON.stringify(surplus),
 
       'Context JSON:',
       JSON.stringify(context, null, 2),
@@ -679,8 +703,14 @@ export class GeminiClient {
     const lp: any = (context as any)?.leagueProfile;
     const scoring = lp?.scoring || {};
     const meta = lp?.meta || {};
+    const needs = (context as any)?.rosterNeeds || [];
+    const surplus = (context as any)?.rosterSurplus || [];
     return [
       'Task: Evaluate the league and recommend up to 3 realistic trades (possibly different opponents) that materially improve my roster.',
+      'Strategy:',
+      '- Market Scan: Look for opponents who are weak where I am strong (My Surplus -> Their Need) and strong where I am weak (Their Surplus -> My Need).',
+      '- Consolidate Value: Try to package 2 good players for 1 elite player ("2-for-1") if I have depth to spare.',
+      '- Depth Building: If I am top-heavy and thin, try to split 1 elite player for 2 serviceable starters ("1-for-2").',
       'Guidelines:',
       '- Identify my biggest needs and surplus positions, then match them against opponents’ weaknesses/strengths.',
       '- Populate myPlayers/theirPlayers strictly with the "id" values from the roster JSON; never emit player names there.',
@@ -702,6 +732,8 @@ export class GeminiClient {
       JSON.stringify(meta, null, 2),
       'LeagueScoring JSON:',
       JSON.stringify(scoring, null, 2),
+      'My Needs:', JSON.stringify(needs),
+      'My Surplus:', JSON.stringify(surplus),
 
       'Context JSON:',
       JSON.stringify(context, null, 2),
