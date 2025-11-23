@@ -385,7 +385,7 @@ export default function AppPage({ initialQuota }: AppPageProps) {
         if (!geminiQuotaTouched) {
           const rawQ = map.geminiRaw.geminiQuota;
           // Upgrade legacy 200 to 250
-          setGeminiQuota((rawQ === 200 ? 250 : rawQ) || 250);
+          setGeminiQuota(Number(rawQ));
         }
       }
 
