@@ -493,7 +493,8 @@ export class BotController {
         confidence: lineup.confidence,
         executed: false,
       };
-      const apply = (this.decisions as any)['config']?.applyChanges === true;
+      const app = new ConfigManager().loadAppSettings();
+      const apply = app.applyChanges === true;
       if (apply) {
         try {
           await this.write.applyLineup(this.getTeamKeyForWrites(), lineup.recommendedLineup);
