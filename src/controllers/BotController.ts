@@ -719,11 +719,6 @@ export class BotController {
         this.audit.recordAction('trades_no_proposal', { confidence: res.confidence, expectedValue: res.expectedValue });
         return;
       }
-      if (!res.shouldTrade || !res.proposal) {
-        this.logger.info('No trade proposed', { confidence: res.confidence, expectedValue: res.expectedValue });
-        this.audit.recordAction('trades_no_proposal', { confidence: res.confidence, expectedValue: res.expectedValue });
-        return;
-      }
       const app = new ConfigManager().loadAppSettings();
       const applyT = app.applyChanges === true;
       if (applyT) {
