@@ -16,7 +16,10 @@ export class GeminiQuota {
     const configManager = new ConfigManager();
     const geminiCreds = configManager.loadGeminiCredentials();
     const envLimit = parseInt(process.env.MAX_GEMINI_CALLS_PER_DAY || '', 10);
-    this.limit = geminiCreds?.geminiQuota ?? (Number.isFinite(envLimit) && envLimit > 0 ? envLimit : (limit ?? 250));
+    let computed = geminiCreds?.geminiQuota;
+    // Upgrade legacy default of 200 to 250 automatically
+    if (computed === 200) computed = 250;
+    this.limit = computed ?? (Number.isFinite(envLimit) && envLimit > 0 ? envLimit : (limit ?? 250));
   }
 
   public static getInstance(): GeminiQuota {

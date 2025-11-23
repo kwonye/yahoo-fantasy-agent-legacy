@@ -382,7 +382,11 @@ export default function AppPage({ initialQuota }: AppPageProps) {
       if (map.geminiRaw?.ok) {
         if (!geminiKeyTouched) setGeminiApiKey(map.geminiRaw.apiKey || '');
         if (!geminiModelTouched) setGeminiModel(map.geminiRaw.model || 'gemini-1.5-pro');
-        if (!geminiQuotaTouched) setGeminiQuota(map.geminiRaw.geminiQuota || 250);
+        if (!geminiQuotaTouched) {
+          const rawQ = map.geminiRaw.geminiQuota;
+          // Upgrade legacy 200 to 250
+          setGeminiQuota((rawQ === 200 ? 250 : rawQ) || 250);
+        }
       }
 
       if (typeof window !== 'undefined') {
